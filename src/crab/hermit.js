@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { applySeaside, createGearGlowUniforms, updateGearGlowUniforms, gearGlowColorAt } from './seaside.js';
-import { buildAssetRig, crabAssetLoaded, shellModelAvailable, buildShellModel, dressShellMaterial, weaponModelAvailable, dressWeaponMaterial } from './hermitAsset.js';
+import { buildAssetRig, crabAssetLoaded, shellModelAvailable, buildShellModel, dressShellMaterial, weaponModelAvailable, dressWeaponMaterial, WEAPON_MODEL_FIT } from './hermitAsset.js';
 
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 const CARAPACE = linearColor(0.86, 0.3, 0.14);
@@ -20,6 +20,9 @@ const ANTENNA_FORWARD_TILT = 1.32;
 const LEG_RISE = 0.28;
 const LEG_SPLAY = 0.32;
 const ATTACK_SECONDS = 0.45;
+const SHOULDER_CARRY = { reach: -1.45, spread: 0.6, open: 0.05 };
+const SHOULDER_CHOP_REACH = 0.4;
+const SHOULDER_WINDUP_EXTRA = 0.25;
 const HURT_SECONDS = 0.55;
 const DEATH_SECONDS = 1.1;
 
@@ -529,19 +532,26 @@ export function createHermit(scene, quality, shellLook, { crabModel = 'player', 
     const claws = { big: { reach: Math.sin(pose.stride + 1) * 0.05 * moving, open: idleOpen, spread: 0 }, small: { reach: -Math.sin(pose.stride + 1) * 0.05 * moving, open: idleOpen * 0.8, spread: 0 } };
     let lunge = 0;
     let pitch = 0;
+    const carriesOnShoulder = Boolean(wornWeapon && WEAPON_MODEL_FIT[wornWeapon].shoulderCarry);
     if (working && gatherType) {
       const gather = gatherPose(gatherType, gatherProgress);
       Object.assign(claws, { big: gather.big, small: gather.small });
       lunge = gather.lunge;
       pitch = gather.pitch;
     }
+    if (carriesOnShoulder) claws.big = { ...SHOULDER_CARRY };
     attack.time = Math.min(1, attack.time + deltaTime / ATTACK_SECONDS);
     if (attack.time < 1) {
       const windup = THREE.MathUtils.smoothstep(attack.time, 0, 0.33) * (1 - THREE.MathUtils.smoothstep(attack.time, 0.33, 0.48));
       const strike = THREE.MathUtils.smoothstep(attack.time, 0.33, 0.48) * (1 - THREE.MathUtils.smoothstep(attack.time, 0.55, 1));
       const power = attack.variant === 'both' ? 1.3 : 1;
       for (const which of attack.variant === 'both' ? ['big', 'small'] : [attack.variant]) {
-        claws[which] = { reach: -0.75 * windup + 0.85 * strike * power, open: 0.9 * windup + 0.05 * strike, spread: -0.35 * strike };
+        if (which === 'big' && carriesOnShoulder) {
+          const chop = THREE.MathUtils.smoothstep(attack.time, 0.33, 0.48) * (1 - THREE.MathUtils.smoothstep(attack.time, 0.6, 1));
+          claws.big = { reach: SHOULDER_CARRY.reach - SHOULDER_WINDUP_EXTRA * windup + (SHOULDER_CHOP_REACH * power - SHOULDER_CARRY.reach) * chop, open: SHOULDER_CARRY.open, spread: SHOULDER_CARRY.spread * (1 - chop) - 0.2 * chop };
+        } else {
+          claws[which] = { reach: -0.75 * windup + 0.85 * strike * power, open: 0.9 * windup + 0.05 * strike, spread: -0.35 * strike };
+        }
       }
       lunge += (-0.14 * windup + 0.5 * strike) * power;
       pitch += -0.12 * windup + 0.14 * strike * power;

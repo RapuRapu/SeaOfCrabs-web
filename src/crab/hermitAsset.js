@@ -28,7 +28,7 @@ export const SHELL_MODEL_FIT = {
 export const WEAPON_MODEL_FIT = {
   shellEdged: { length: 1.9, along: 0.55, rotation: [-Math.PI / 2, 0, 0], anchor: [0, 0, 0], metalness: 0, roughness: 0.85, tint: [0.96, 0.86, 0.72], normalScale: 0.5 },
   coralTipped: { length: 2.0, along: 1.0, rotation: [-Math.PI / 2, 0, 0], anchor: [0, 0, 0], metalness: 0, roughness: 0.75 },
-  cleaver: { length: 3.4, along: 0.85, rotation: [0, 0, -Math.PI / 2], anchor: [0.64, 0.16, 0], metalness: 0.45, roughness: 0.4 },
+  cleaver: { length: 3.4, along: 0.85, rotation: [0, Math.PI / 2, -Math.PI / 2], anchor: [0.64, 0.16, 0], metalness: 0.45, roughness: 0.4, shoulderCarry: true },
 };
 const WEAPON_MODEL_LENGTH = 1.9;
 
