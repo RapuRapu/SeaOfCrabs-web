@@ -369,6 +369,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   const highlightMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(0.6, 2.2, 0.8), transparent: true, opacity: 0.5, depthWrite: false });
   const highlights = new THREE.InstancedMesh(new RoundedBoxGeometry(2.2, 0.04, 2.2, 2, 0.4), highlightMaterial, BURROW_SPAN * BURROW_SPAN);
   highlights.count = 0;
+  highlights.frustumCulled = false;
   highlights.renderOrder = 6;
   interior.add(highlights);
   scene.add(interior);

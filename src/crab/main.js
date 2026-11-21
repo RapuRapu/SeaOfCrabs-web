@@ -2725,11 +2725,17 @@ hud.onMap(() => {
   if (!anyPanelOpen()) openMap();
 });
 
+function surfacePointAbovePlayer() {
+  const shaft = cellCenter(SHAFT_CELL.column, SHAFT_CELL.row);
+  const column = SHAFT_CELL.column + (player.x - shaft.x) / BURROW_CELL;
+  const row = SHAFT_CELL.row + (player.z - shaft.z) / BURROW_CELL;
+  return burrow.surfacePointOf(column, row) || burrow.state.entrance;
+}
+
 function openMap() {
-  const surfacePosition = underground ? (nearestTravelPoint() ? nearestTravelPoint().point.surface : burrow.state.entrance) : { x: player.x, z: player.z };
   mapView.open({
-    player: surfacePosition,
-    playerHeading: underground ? 0 : player.heading,
+    player: underground ? surfacePointAbovePlayer() : { x: player.x, z: player.z },
+    playerHeading: player.heading,
     bosses: enemies.list.filter((enemy) => enemy.definition.boss || enemy.kind === 'gull').map((enemy) => ({ x: enemy.home.x, z: enemy.home.z })),
     entrances: burrow.exists ? burrow.travelPoints().map((point) => point.surface) : [],
     remains: remains.list.map((entry) => ({ x: entry.x, z: entry.z })).filter((point) => fog.isRevealed(point.x, point.z)),
@@ -2987,7 +2993,7 @@ if (isScreenshotMode) {
 }
 
 window.__debug = {
-  hud, setShowPerformance, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
+  hud, setShowPerformance, surfacePointAbovePlayer, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
   tracks, ripples, hermit, gear, workshop, workbenchPanel, salvageItem, startMovingStructure, dismantleStructure, moveStationTo, moveRackTo, isRecipeDiscovered, placement, cancelPlacement, backpack, openBackpack, buildWorkshop, craftItem, wearItem, unequipItem, walkToWorkshop, setDestination, setPaused, handleTap, renderScene, updateCamera, seaLevelAt,
   audio, isAudioUnlocked: () => audioUnlocked, progression, statusPanel, difficultyOf, experienceForKill, enemies, remains, engage, die, recoverRemains, playerStats, randomSource, upgradeTools, refineItem, modifyItem, startMolt, finishMolt, isMolting, isSoft, moltPanel, rack, rackPanel, buildRackStation, eatKelp, useConsumable, craftSupply, assignQuickSlot, quickSlots, isWellFed, walkToRack, helpers, helpersPanel, equipHelper, openMap, startFillMode, startFillCell, startSleeping, wakeUp, isRested, mapView, fog, exitCellProblem, chooseStation, nearestTravelPoint, rescueHelperAt, walkToStranded, burrow, storage, storagePanel, buildPanel, enterBurrow, exitBurrow, travel, travelOption, walkToShaft, cameraDistanceFor, getCameraDistance: () => cameraDistance, digEntranceAt, chooseEntranceSpot, startEntrancePlacement, buildStation, startDigCell, previewEntranceSpot, walkToEntrance, walkToStation, isUnderground: () => underground, entranceSpotProblem, wakeSpot, persist, startOver,
   setCameraDistance: (distance) => { cameraDistance = distance; },

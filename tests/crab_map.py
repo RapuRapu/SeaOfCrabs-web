@@ -16,7 +16,16 @@ FLOW = r'''
   let distinctColours = new Set();
   for (let y = canvas.height * 0.3; y < canvas.height * 0.7; y += 7) for (let x = canvas.width * 0.3; x < canvas.width * 0.7; x += 7) distinctColours.add(at(x, y).map((value) => value >> 3).join(','));
   const visible = getComputedStyle(document.querySelector('#hud .map-panel')).display !== 'none' && document.querySelector('#hud .map-panel').classList.contains('visible');
-  return { openMilliseconds, distinctColours: distinctColours.size, corner: at(4, 4), visible };
+  Object.assign(d.save.inventory, { shellBits: 5, driftwood: 3, seaLettuce: 3 });
+  d.buildWorkshop();
+  if (!d.isUnderground()) d.enterBurrow();
+  d.burrow.finishDig(3, 2);
+  const cell = d.burrow.stationSpot({ column: 3, row: 2 });
+  Object.assign(d.player, { x: cell.x, z: cell.z });
+  const above = d.surfacePointAbovePlayer();
+  const expected = d.burrow.surfacePointOf(3, 2);
+  const undergroundPoint = Math.hypot(above.x - expected.x, above.z - expected.z) < 0.5 && Math.hypot(above.x - d.burrow.state.entrance.x, above.z - d.burrow.state.entrance.z) > 5;
+  return { openMilliseconds, distinctColours: distinctColours.size, corner: at(4, 4), visible, undergroundPoint };
 }
 '''
 
@@ -37,6 +46,7 @@ with sync_playwright() as playwright:
         'detailedTerrain': out['distinctColours'] >= 40,
         'unexploredBlack': max(out['corner']) < 12,
         'opensQuickly': out['openMilliseconds'] < 1500,
+        'undergroundShowsSurfacePoint': out['undergroundPoint'],
         'noErrors': not errors,
     }
     print(json.dumps(checks, indent=2), errors)
