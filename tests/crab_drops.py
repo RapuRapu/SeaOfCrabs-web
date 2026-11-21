@@ -134,7 +134,7 @@ with sync_playwright() as playwright:
     page.evaluate(HELPERS)
     crafting = page.evaluate(r"""() => {
       const d = window.__debug; const out = {};
-      d.save.inventory = { apronScrap: 3, scrap: 6, fishBone: 4, catWhisker: 2, gullFeather: 2, lobsterPlate: 2 };
+      d.save.inventory = { apronScrap: 2, scrap: 6, fishBone: 4, catWhisker: 2, gullFeather: 2, lobsterPlate: 2 };
       d.gear.state.shells = [{ id: 900, kind: 'snail', quality: 'fine' }];
       const cleaver = d.craftItem('claws', 'cleaver');
       out.crafted = [!!cleaver, !!d.modifyItem(cleaver.id, 'whisker'), !!d.modifyItem(900, 'featherLining')];

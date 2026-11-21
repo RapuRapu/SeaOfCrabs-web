@@ -66,7 +66,7 @@ export const CLAWS = {
   bare: { label: 'Bare claws', attackBonus: 0, cost: null },
   shellEdged: { label: 'Shell-edged claws', attackBonus: 4, cost: { shellBits: 6, driftwood: 4 } },
   coralTipped: { label: 'Coral-tipped claws', tier: 2, attackBonus: 8, cost: { coral: 5, seaGlass: 2, driftwood: 2 }, tint: [1.7, 1.25, 1.6] },
-  cleaver: { label: 'Cleaver claws', tier: 5, trophy: 'cook', attackBonus: 24, cost: { apronScrap: 3, scrap: 6, fishBone: 4 }, tint: [1.25, 1.3, 1.4] },
+  cleaver: { label: 'Cleaver claws', tier: 5, trophy: 'cook', attackBonus: 24, cost: { apronScrap: 2, scrap: 6, fishBone: 4 }, tint: [1.25, 1.3, 1.4] },
 };
 
 export const BOSS_TROPHIES = {
