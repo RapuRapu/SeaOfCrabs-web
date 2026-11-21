@@ -252,12 +252,17 @@
   #hud:not(.underground) .burrow-label { display: none; }
   #hud.underground .hint { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 128px); }
   #hud.panel-open .burrow-buttons, #hud.panel-open .mode-bar, #hud.panel-open .world-label { visibility: hidden; }
-  #hud .travel-button { position: absolute; left: 0; top: 0; padding: 10px 16px; border-radius: 14px; border: 2px solid #5a3d1c; background: rgba(255, 244, 214, 0.97); color: #3a2a14; text-shadow: none; font-size: 18px; font-weight: bold; pointer-events: auto; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
+  #hud .travel-group { position: absolute; left: 0; top: 0; display: grid; grid-template-columns: auto auto; justify-content: center; gap: 6px; pointer-events: none; }
+  #hud .travel-group .travel-button { grid-column: 1 / -1; justify-self: center; }
+  #hud .travel-group.hidden, #hud .travel-action.hidden { display: none; }
+  #hud .travel-action { padding: 7px 10px; border-radius: 12px; border: 1px solid #5a3d1c; background: rgba(255, 244, 214, 0.85); color: #3a2a14; text-shadow: none; font-size: 14px; font-weight: bold; pointer-events: auto; }
+  #hud .travel-action.armed { background: #c94a2a; color: #fff8e8; border-color: #ffd2a8; }
+  #hud .travel-button { padding: 10px 16px; border-radius: 14px; border: 2px solid #5a3d1c; background: rgba(255, 244, 214, 0.97); color: #3a2a14; text-shadow: none; font-size: 18px; font-weight: bold; pointer-events: auto; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35); }
   #hud .travel-button.hidden { display: none; }
   #hud .travel-button.bump { animation: slot-bump 0.45s ease-out; }
   #hud.travel-shown:not(.underground) .hint { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 70px); }
   #hud.travel-shown.underground .hint { bottom: calc(max(14px, env(safe-area-inset-bottom)) + 182px); }
-  #hud.panel-open .travel-button, #hud.placing .travel-button { visibility: hidden; }
+  #hud.panel-open .travel-group, #hud.placing .travel-group { visibility: hidden; }
   #hud.travel-shown .entrance-label, #hud.travel-shown .exit-label { visibility: hidden; }
   @media (max-height: 500px) { #hud.underground .hint, #hud.travel-shown.underground .hint { bottom: auto; top: calc(max(8px, env(safe-area-inset-top)) + 128px); width: min(92vw, 820px); } }
   #hud.placing .burrow-label { visibility: hidden; }

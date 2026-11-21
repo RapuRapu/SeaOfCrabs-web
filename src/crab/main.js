@@ -941,8 +941,14 @@ function refreshHud(bumpedType) {
   hud.setMoltButton(underground && !isMolting() ? progression.moltsAvailable() : 0);
 }
 
+const travelBlockedCells = new Map();
+const travelPointKey = (point) => (point.station ? point.station.id : 'main');
+
 function blockEntrance() {
-  for (const point of burrow.travelPoints()) world.blockCircle(point.surface.x, point.surface.z, ENTRANCE_BLOCK_RADIUS);
+  for (const point of burrow.travelPoints()) {
+    const key = travelPointKey(point);
+    if (!travelBlockedCells.has(key)) travelBlockedCells.set(key, world.blockCircle(point.surface.x, point.surface.z, ENTRANCE_BLOCK_RADIUS));
+  }
   if (!underground && !world.isWalkable(player.x, player.z)) {
     const free = navigation.nearestWalkable(player.x, player.z, 10);
     if (free) Object.assign(player, { x: free.x, z: free.z });
@@ -985,6 +991,14 @@ function startEntrancePlacement() {
 }
 
 function cancelPlacement() {
+  if (placement.relocatingExit) {
+    burrow.restoreExit(placement.relocatingExit, workshop);
+    placement.relocatingExit = null;
+    save.burrow = burrow.serialize();
+    blockEntrance();
+    hud.log('build', 'Exit left where it was');
+    persist();
+  }
   placement.entrance = false;
   placement.preview = null;
   spotFeedbackUntil = 0;
@@ -1037,17 +1051,17 @@ function chooseEntranceSpot(x, z) {
   return true;
 }
 
-function buildStation(kind, column, row) {
+function buildStation(kind, column, row, { free = false } = {}) {
   const definition = STATION_KINDS[kind];
-  if (!definition || (!definition.multiple && burrow.hasStation(kind)) || !canAfford(definition.cost, save.inventory)) return false;
+  if (!definition || (!definition.multiple && burrow.hasStation(kind)) || (!free && !canAfford(definition.cost, save.inventory))) return false;
   const exitSpot = kind === 'exit' ? burrow.exitWallSpots().find((spot) => spot.column === column && spot.row === row) : null;
   if (kind === 'exit' && (!exitSpot || exitCellProblem(column, row))) return false;
   if (kind !== 'exit' && !burrow.freeCells().some((cell) => cell.column === column && cell.row === row)) return false;
-  for (const [type, amount] of Object.entries(definition.cost)) save.inventory[type] -= amount;
+  if (!free) for (const [type, amount] of Object.entries(definition.cost)) save.inventory[type] -= amount;
   const station = exitSpot ? burrow.addExit(exitSpot, workshop) : burrow.addStation(kind, column, row, workshop);
   if (kind === 'workshop') workshop.build();
   if (kind === 'exit') {
-    exitBlockedCells.set(station.id, world.blockCircle(station.surface.x, station.surface.z, ENTRANCE_BLOCK_RADIUS));
+    blockEntrance();
     fog.reveal(station.surface.x, station.surface.z, 8);
   }
   save.burrow = burrow.serialize();
@@ -1057,7 +1071,7 @@ function buildStation(kind, column, row) {
     if (free) Object.assign(player, { x: free.x, z: free.z });
   }
   soundAt('craft');
-  hud.log('build', { workshop: 'Workshop built — tap it to craft', exit: 'Exit dug — walk to it to go up', crabBed: 'Crab bed built — tap it to sleep' }[kind] || `${definition.label} built — tap it to open`);
+  hud.log('build', { workshop: 'Workshop built — tap it to craft', exit: free ? 'Exit moved' : 'Exit dug — walk to it to go up', crabBed: 'Crab bed built — tap it to sleep' }[kind] || `${definition.label} built — tap it to open`);
   refreshHud(null);
   persist();
   return true;
@@ -1128,7 +1142,6 @@ function chooseStation(kind) {
 const BOSS_EXIT_CLEARANCE = 24;
 const EXIT_PICK_DISTANCE = 2.4;
 const EXIT_SPACING = 7;
-const exitBlockedCells = new Map();
 
 function exitCellProblem(column, row) {
   const surface = burrow.surfacePointOf(column, row);
@@ -1281,6 +1294,66 @@ function travel() {
   const option = travelOption();
   if (option === 'enter') return enterBurrow(nearestTravelPoint().point);
   if (option === 'exit') return exitBurrow(nearestTravelPoint().point);
+  return false;
+}
+
+function travelActions() {
+  const nearest = travelOption() && nearestTravelPoint();
+  if (!nearest) return null;
+  return { move: Boolean(nearest.point.station), remove: true };
+}
+
+function removeTravelPoint(point) {
+  if (burrow.travelPoints().length <= 1) {
+    hud.log('notice', point.station ? 'This exit is your only way in and out — dig another exit first' : 'This is your only way in and out — dig an exit first');
+    return false;
+  }
+  world.unblockCells(travelBlockedCells.get(travelPointKey(point)) || []);
+  travelBlockedCells.delete(travelPointKey(point));
+  if (point.station) {
+    if (player.walkGoal === point.station) stopWalking();
+    burrow.removeExit(point.station);
+    const refund = { ...STATION_KINDS.exit.cost };
+    for (const [type, amount] of Object.entries(refund)) save.inventory[type] = (save.inventory[type] || 0) + amount;
+    hud.log('build', `Exit filled in — +${materialsText(refund)}`);
+  } else {
+    burrow.closeEntrance();
+    hud.log('build', 'Main entrance filled in — your exits still lead home');
+  }
+  if (underground && !burrow.space.isWalkable(player.x, player.z)) {
+    const free = burrow.space.nearestWalkable(player.x, player.z);
+    if (free) Object.assign(player, { x: free.x, z: free.z });
+  }
+  save.burrow = burrow.serialize();
+  soundAt('craft');
+  refreshHud(null);
+  persist();
+  return true;
+}
+
+function startMovingExit(station) {
+  if (!station) return false;
+  const point = burrow.travelPoints().find((candidate) => candidate.station === station);
+  if (!underground && point) enterBurrow(point);
+  closePanels();
+  stopWalking();
+  world.unblockCells(travelBlockedCells.get(station.id) || []);
+  travelBlockedCells.delete(station.id);
+  const { label, ...kept } = station;
+  burrow.removeExit(station);
+  placement.relocatingExit = structuredClone(kept);
+  placement.station = 'exit';
+  placement.exitSpots = burrow.exitWallSpots().filter((spot) => !exitCellProblem(spot.column, spot.row));
+  burrow.showExitSpots(placement.exitSpots);
+  hud.setMode('Tap a glowing spot to move the exit', cancelPlacement);
+  return true;
+}
+
+function handleTravelAction(kind) {
+  const nearest = travelOption() && nearestTravelPoint();
+  if (!nearest) return false;
+  if (kind === 'remove') return removeTravelPoint(nearest.point);
+  if (kind === 'move') return startMovingExit(nearest.point.station);
   return false;
 }
 
@@ -2439,7 +2512,7 @@ function renderScene() {
   if (rackPanel.isOpen && !rackPanel.isPressed && Math.floor(simulationTime) !== Math.floor(simulationTime - 1 / 60)) rackPanel.render();
   if (helpersPanel.isOpen && Math.floor(simulationTime * 2) !== Math.floor((simulationTime - 1 / 60) * 2)) helpersPanel.refresh();
   const travelShown = travelOption();
-  hud.setTravel(travelShown);
+  hud.setTravel(travelShown, travelShown ? travelActions() : null);
   if (travelShown) {
     const anchor = burrow.travelLabelPoint(nearestTravelPoint().point, underground);
     travelProjection.set(anchor.x, anchor.y, anchor.z).project(camera);
@@ -2522,7 +2595,10 @@ function handleBurrowTap(clientX, clientY, isNewTouch) {
       const distance = Math.hypot(candidate.marker.x - floor.x, candidate.marker.z - floor.z);
       return distance < EXIT_PICK_DISTANCE && (!best || distance < best.distance) ? { candidate, distance } : best;
     }, null);
-    if (spot && buildStation('exit', spot.candidate.column, spot.candidate.row)) cancelPlacement();
+    if (spot && buildStation('exit', spot.candidate.column, spot.candidate.row, { free: Boolean(placement.relocatingExit) })) {
+      placement.relocatingExit = null;
+      cancelPlacement();
+    }
     else if (floor) hud.log('notice', 'Pick one of the glowing spots');
     return;
   }
@@ -2705,6 +2781,7 @@ hud.onVolume((key, value) => {
   }
 });
 hud.onTravel(travel);
+hud.onTravelAction(handleTravelAction);
 hud.onQuickSlot((index) => {
   const type = quickSlots()[index];
   if (!type) hud.log('notice', 'Open the backpack and tap an item to put it in a quick slot');
@@ -2996,7 +3073,7 @@ if (isScreenshotMode) {
 
 window.__debug = {
   hud, setShowPerformance, surfacePointAbovePlayer, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
-  tracks, ripples, hermit, gear, workshop, workbenchPanel, salvageItem, startMovingStructure, dismantleStructure, moveStationTo, moveRackTo, isRecipeDiscovered, placement, cancelPlacement, backpack, openBackpack, buildWorkshop, craftItem, wearItem, unequipItem, walkToWorkshop, setDestination, setPaused, handleTap, renderScene, updateCamera, seaLevelAt,
+  tracks, ripples, hermit, gear, workshop, workbenchPanel, salvageItem, startMovingStructure, dismantleStructure, removeTravelPoint, startMovingExit, handleTravelAction, travelActions, moveStationTo, moveRackTo, isRecipeDiscovered, placement, cancelPlacement, backpack, openBackpack, buildWorkshop, craftItem, wearItem, unequipItem, walkToWorkshop, setDestination, setPaused, handleTap, renderScene, updateCamera, seaLevelAt,
   audio, isAudioUnlocked: () => audioUnlocked, progression, statusPanel, difficultyOf, experienceForKill, enemies, remains, engage, die, recoverRemains, playerStats, randomSource, upgradeTools, refineItem, modifyItem, startMolt, finishMolt, isMolting, isSoft, moltPanel, rack, rackPanel, buildRackStation, eatKelp, useConsumable, craftSupply, assignQuickSlot, quickSlots, isWellFed, walkToRack, helpers, helpersPanel, equipHelper, openMap, startFillMode, startFillCell, startSleeping, wakeUp, isRested, mapView, fog, exitCellProblem, chooseStation, nearestTravelPoint, rescueHelperAt, walkToStranded, burrow, storage, storagePanel, buildPanel, enterBurrow, exitBurrow, travel, travelOption, walkToShaft, cameraDistanceFor, getCameraDistance: () => cameraDistance, digEntranceAt, chooseEntranceSpot, startEntrancePlacement, buildStation, startDigCell, previewEntranceSpot, walkToEntrance, walkToStation, isUnderground: () => underground, entranceSpotProblem, wakeSpot, persist, startOver,
   setCameraDistance: (distance) => { cameraDistance = distance; },
   setRendering: (enabled) => { rendersFrames = enabled; },

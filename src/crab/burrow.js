@@ -384,8 +384,13 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   let lastUpdateTime = null;
   const sandNoise = createNoise2D(91);
 
-  const exitKeep = new Set(EXIT_KEEP_CELLS.map(([column, row]) => cellIndex(SHAFT_CELL.column + column, SHAFT_CELL.row + row)));
-  for (const station of state.stations) for (const [column, row] of station.keep || []) exitKeep.add(cellIndex(column, row));
+  const exitKeep = new Set();
+  function rebuildExitKeep() {
+    exitKeep.clear();
+    if (!state.entranceClosed) for (const [column, row] of EXIT_KEEP_CELLS) exitKeep.add(cellIndex(SHAFT_CELL.column + column, SHAFT_CELL.row + row));
+    for (const station of state.stations) for (const [column, row] of station.keep || []) exitKeep.add(cellIndex(column, row));
+  }
+  rebuildExitKeep();
   const isDug = (column, row) => insideGrid(column, row) && dugCells.has(cellIndex(column, row));
   const stationAt = (column, row) => state.stations.find((station) => station.column === column && station.row === row) || null;
 
@@ -430,7 +435,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     }
     const filled = total / weight;
     const exitDistance = Math.hypot(x - (shaftCenter.x - BURROW_ORIGIN.x), z - (shaftCenter.z - BURROW_ORIGIN.z) - BURROW_CELL * 0.6);
-    const exitRise = (EXIT_SAND_HEIGHT - WALL_HEIGHT) * (1 - THREE.MathUtils.smoothstep(exitDistance, BURROW_CELL * 0.9, BURROW_CELL * 2.3));
+    const exitRise = state.entranceClosed ? 0 : (EXIT_SAND_HEIGHT - WALL_HEIGHT) * (1 - THREE.MathUtils.smoothstep(exitDistance, BURROW_CELL * 0.9, BURROW_CELL * 2.3));
     return THREE.MathUtils.smoothstep(filled, 0.38, 0.98) * (WALL_HEIGHT + exitRise) * (1 + 0.1 * sandNoise(x * 0.45, z * 0.45));
   }
 
@@ -772,7 +777,34 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   function setEntrance(x, z, y) {
     state.entrance = { x, z };
     entranceGroup.position.set(x, y, z);
-    entranceGroup.visible = true;
+    showEntranceOpen();
+  }
+
+  function showEntranceOpen() {
+    const open = !state.entranceClosed;
+    entranceGroup.visible = open;
+    if (exitModel) exitModel.visible = open;
+    else shaft.beam.visible = open;
+    shaft.pool.visible = open;
+  }
+
+  function closeEntrance() {
+    state.entranceClosed = true;
+    showEntranceOpen();
+    rebuildExitKeep();
+    rebuildWalls();
+  }
+
+  function removeExit(station) {
+    removeStation(station);
+    rebuildExitKeep();
+    finishFill(station.column, station.row);
+  }
+
+  function restoreExit(station, workshopModel) {
+    const restored = addExit({ column: station.column, row: station.row, keep: station.keep, accessColumn: station.access.column, accessRow: station.access.row }, workshopModel);
+    restored.id = station.id;
+    return restored;
   }
 
   function pointOnFloor(clientX, clientY, camera, raycaster) {
@@ -882,7 +914,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
 
   function travelPoints() {
     const points = [];
-    if (state.entrance) points.push({ station: null, below: { x: shaftCenter.x, z: shaftCenter.z }, surface: { x: state.entrance.x, z: state.entrance.z } });
+    if (state.entrance && !state.entranceClosed) points.push({ station: null, below: { x: shaftCenter.x, z: shaftCenter.z }, surface: { x: state.entrance.x, z: state.entrance.z } });
     for (const station of state.stations) if (station.kind === 'exit') points.push({ station, below: stationSpot(station), surface: station.surface });
     return points;
   }
@@ -943,8 +975,9 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
 
   function update(time, camera, underground) {
     highlightMaterial.opacity = 0.45 + 0.3 * Math.sin(time * 4);
-    if (state.entrance) placeLabel(entranceLabel, state.entrance.x, entranceGroup.position.y + 2.4, state.entrance.z, camera, !underground);
-    placeLabel(exitLabel, shaftCenter.x, BURROW_ORIGIN.y + 1.4, shaftCenter.z - 0.6, camera, underground);
+    const entranceOpen = state.entrance && !state.entranceClosed;
+    placeLabel(entranceLabel, state.entrance ? state.entrance.x : 0, entranceGroup.position.y + 2.4, state.entrance ? state.entrance.z : 0, camera, entranceOpen && !underground);
+    placeLabel(exitLabel, shaftCenter.x, BURROW_ORIGIN.y + 1.4, shaftCenter.z - 0.6, camera, entranceOpen && underground);
     for (const station of state.stations) {
       if (!station.label) continue;
       const spot = stationSpot(station);
@@ -1002,11 +1035,17 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     finishFill,
     showExitSpots,
     addExit,
+    removeExit,
+    restoreExit,
+    closeEntrance,
+    get entranceOpen() {
+      return Boolean(state.entrance) && !state.entranceClosed;
+    },
     surfacePointOf,
     cellIndex,
     get exists() {
       return Boolean(state.entrance);
     },
-    serialize: () => ({ entrance: state.entrance, dug: [...dugCells], grid: BURROW_SPAN, stations: state.stations.map(({ label, ...station }) => structuredClone(station)) }),
+    serialize: () => ({ entrance: state.entrance, entranceClosed: Boolean(state.entranceClosed), dug: [...dugCells], grid: BURROW_SPAN, stations: state.stations.map(({ label, ...station }) => structuredClone(station)) }),
   };
 }

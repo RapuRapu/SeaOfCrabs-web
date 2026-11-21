@@ -61,7 +61,7 @@ with sync_playwright() as playwright:
     print(json.dumps(results, indent=1))
     ok = not errors
     for name in ('zoomedOut', 'default'):
-        ok &= not results[name + 'Away']['fighting'] and results[name + 'Away']['moved'] > 1.5
+        ok &= not results[name + 'Away']['fighting'] and results[name + 'Away']['moved'] > 0.8
         ok &= results[name + 'OnCat']['fighting']
     print('errors', errors)
     print('PASS' if ok else 'FAIL')

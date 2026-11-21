@@ -11,6 +11,7 @@ function element(tag, className, parent, text) {
 
 const SETTINGS_ICON_SVG = '<svg viewBox="0 0 24 24"><path fill="#fff8e8" fill-rule="evenodd" d="M10.3 1.5h3.4l.5 2.8 1.9.8 2.3-1.6 2.4 2.4-1.6 2.3.8 1.9 2.8.5v3.4l-2.8.5-.8 1.9 1.6 2.3-2.4 2.4-2.3-1.6-1.9.8-.5 2.8h-3.4l-.5-2.8-1.9-.8-2.3 1.6-2.4-2.4 1.6-2.3-.8-1.9-2.8-.5v-3.4l2.8-.5.8-1.9-1.6-2.3 2.4-2.4 2.3 1.6 1.9-.8zM12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6z"/></svg>';
 const TRAVEL_EDGE_PIXELS = 70;
+const REMOVE_CONFIRM_MS = 3000;
 const TRAVEL_TOP_PIXELS = 130;
 
 export function createHud(activeQualityName) {
@@ -52,7 +53,10 @@ export function createHud(activeQualityName) {
     button.addEventListener('click', () => quickSlotListener(index));
     return { button, icon, count, cooldown };
   });
-  const travelButton = element('button', 'travel-button hidden', root);
+  const travelGroup = element('div', 'travel-group hidden', root);
+  const travelButton = element('button', 'travel-button hidden', travelGroup);
+  const travelMoveButton = element('button', 'travel-action move hidden', travelGroup, 'Move');
+  const travelRemoveButton = element('button', 'travel-action remove hidden', travelGroup, 'Remove');
   const modeBar = element('div', 'mode-bar hidden', root);
   const modeText = element('span', 'mode-text', modeBar);
   const modeCancel = element('button', 'mode-cancel', modeBar, 'Cancel');
@@ -142,6 +146,9 @@ export function createHud(activeQualityName) {
   let modeCancelListener = () => {};
   let travelListener = () => {};
   let travelShown = null;
+  let travelActionsShown = '';
+  let travelActionListener = () => {};
+  let removeArmedUntil = 0;
   let resetArmed = false;
 
   pauseButton.addEventListener('click', () => pauseListener(true));
@@ -151,6 +158,23 @@ export function createHud(activeQualityName) {
   moltButton.addEventListener('click', () => moltListener());
   modeCancel.addEventListener('click', () => modeCancelListener());
   travelButton.addEventListener('click', () => travelListener());
+  travelMoveButton.addEventListener('click', () => travelActionListener('move'));
+  travelRemoveButton.addEventListener('click', () => {
+    if (performance.now() > removeArmedUntil) {
+      removeArmedUntil = performance.now() + REMOVE_CONFIRM_MS;
+      travelRemoveButton.textContent = 'Remove?';
+      travelRemoveButton.classList.add('armed');
+      setTimeout(disarmRemove, REMOVE_CONFIRM_MS);
+      return;
+    }
+    disarmRemove();
+    travelActionListener('remove');
+  });
+  function disarmRemove() {
+    removeArmedUntil = 0;
+    travelRemoveButton.textContent = 'Remove';
+    travelRemoveButton.classList.remove('armed');
+  }
   levelBadge.addEventListener('click', () => statusListener());
   mapButton.addEventListener('click', () => mapListener());
   resumeButton.addEventListener('click', () => pauseListener(false));
@@ -208,18 +232,28 @@ export function createHud(activeQualityName) {
       if (moltCount.textContent !== countText) moltCount.textContent = countText;
     },
     onTravel: (listener) => { travelListener = listener; },
-    setTravel(option) {
+    onTravelAction: (listener) => { travelActionListener = listener; },
+    setTravel(option, actions = null) {
+      const actionsKey = actions ? `${actions.move ? 'm' : ''}${actions.remove ? 'r' : ''}` : '';
+      if (actionsKey !== travelActionsShown) {
+        travelActionsShown = actionsKey;
+        travelMoveButton.classList.toggle('hidden', !(actions && actions.move));
+        travelRemoveButton.classList.toggle('hidden', !(actions && actions.remove));
+        disarmRemove();
+      }
       if (option === travelShown) return;
       travelShown = option;
+      travelGroup.classList.toggle('hidden', !option);
       travelButton.classList.toggle('hidden', !option);
       root.classList.toggle('travel-shown', Boolean(option));
       if (option) travelButton.textContent = option === 'enter' ? 'Enter burrow' : 'Go outside';
     },
     placeTravel(screenX, screenY) {
       if (!travelShown) return;
-      const x = Math.min(innerWidth - TRAVEL_EDGE_PIXELS, Math.max(TRAVEL_EDGE_PIXELS, screenX));
+      const edge = Math.max(TRAVEL_EDGE_PIXELS, travelGroup.offsetWidth / 2 + 8);
+      const x = Math.min(innerWidth - edge, Math.max(edge, screenX));
       const y = Math.min(innerHeight - TRAVEL_EDGE_PIXELS, Math.max(TRAVEL_TOP_PIXELS, screenY));
-      travelButton.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
+      travelGroup.style.transform = `translate(-50%, -100%) translate(${x}px, ${y}px)`;
     },
     bumpTravel() {
       travelButton.classList.remove('bump');
