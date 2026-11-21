@@ -173,6 +173,13 @@ export function buildAssetRig({ bodyMaterial, clawMaterial, abdomenMaterial, rea
       const claw = claws[which];
       const motion = clawPose[which];
       const tuck = retract * 0.9;
+      if (motion.joints) {
+        const [raise, elbow, wrist, spread] = motion.joints;
+        claw.joints[0].pose(raise + tuck, claw.side * spread);
+        claw.joints[1].pose(elbow + tuck * 0.6);
+        claw.joints[2].pose(wrist);
+        continue;
+      }
       const windup = Math.max(0, -motion.reach);
       const thrust = Math.max(0, motion.reach);
       claw.joints[0].pose(windup * CLAW_REACH + thrust * 0.3 + tuck, claw.side * motion.spread * CLAW_SPREAD);
