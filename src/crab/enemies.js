@@ -40,7 +40,10 @@ const OUT_OF_REACH_RESET_SECONDS = 1;
 const PACK_SPREAD = 3.5;
 const HURT_SECONDS = 0.45;
 const KNOCKBACK_BY_KIND = { cockroach: 0.3, cook: 0, rat: 0.2, shipCat: 0, sandHopper: 0.6, shoreCrab: 0.25, gull: 0.1, moray: 0, octopus: 0.15, mantisShrimp: 0.4, giantLobster: 0 };
-const PICK_RADIUS_BY_KIND = { cockroach: 60, cook: 130, rat: 70, shipCat: 120, gull: 110, giantLobster: 120, octopus: 75, shoreCrab: 60, moray: 60 };
+const MIN_PICK_RADIUS_PIXELS = 40;
+const PICK_BODY_MARGIN = 1.25;
+const pickEdge = new THREE.Vector3();
+const cameraRight = new THREE.Vector3();
 const INK_CLOUD_RADIUS = 3.2;
 const MORAY_SCALE = 1.45;
 const RETREAT_COOLDOWN_SECONDS = 5;
@@ -1328,15 +1331,23 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     }
   }
 
+  function pickShare(enemy, clientX, clientY, camera) {
+    labelPoint.set(enemy.x, enemy.y + enemy.definition.radius * 0.8, enemy.z).project(camera);
+    if (labelPoint.z > 1) return Infinity;
+    const screenX = (labelPoint.x * 0.5 + 0.5) * innerWidth;
+    const screenY = (-labelPoint.y * 0.5 + 0.5) * innerHeight;
+    cameraRight.setFromMatrixColumn(camera.matrixWorld, 0);
+    pickEdge.set(enemy.x, enemy.y + enemy.definition.radius * 0.8, enemy.z).addScaledVector(cameraRight, enemy.definition.radius * PICK_BODY_MARGIN).project(camera);
+    const bodyRadius = Math.hypot((pickEdge.x * 0.5 + 0.5) * innerWidth - screenX, (-pickEdge.y * 0.5 + 0.5) * innerHeight - screenY);
+    return Math.hypot(screenX - clientX, screenY - clientY) / Math.max(MIN_PICK_RADIUS_PIXELS, bodyRadius);
+  }
+
   function pick(clientX, clientY, camera) {
     let best = null;
     for (const enemy of list) {
       if (!alive(enemy) || enemy.altitude > 3) continue;
-      labelPoint.set(enemy.x, enemy.y + enemy.definition.radius * 0.8, enemy.z).project(camera);
-      if (labelPoint.z > 1) continue;
-      const distance = Math.hypot((labelPoint.x * 0.5 + 0.5) * innerWidth - clientX, (-labelPoint.y * 0.5 + 0.5) * innerHeight - clientY);
-      const radius = PICK_RADIUS_BY_KIND[enemy.kind] || 48;
-      if (distance < radius && (!best || distance < best.distance)) best = { enemy, distance };
+      const share = pickShare(enemy, clientX, clientY, camera);
+      if (share < 1 && (!best || share < best.share)) best = { enemy, share };
     }
     return best ? best.enemy : null;
   }
@@ -1350,5 +1361,5 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
 
   const inkAt = (time) => (ink.until > time ? ink : null);
 
-  return { list, update, render, pick, damage, calmAll, alive, spawn, startChase, giveUp, setReefVisible, setCampVisible, setHoldVisible, inkAt };
+  return { list, update, render, pick, pickShare, damage, calmAll, alive, spawn, startChase, giveUp, setReefVisible, setCampVisible, setHoldVisible, inkAt };
 }

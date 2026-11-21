@@ -63,6 +63,7 @@ const TURN_RATE = 9;
 const GATHER_REACH = 2.5;
 const PICK_RADIUS_PIXELS = 46;
 const DRAG_START_PIXELS = 14;
+const CURRENT_TARGET_CORE_SHARE = 0.5;
 const SURFACE_CAMERA_DISTANCE = 32;
 const BURROW_FRAMED_WIDTH = 11;
 const BURROW_FRAMED_DEPTH = 17;
@@ -2592,7 +2593,8 @@ function handleTap(clientX, clientY, isNewTouch) {
     return;
   }
   const pickedEnemy = isNewTouch ? enemies.pick(clientX, clientY, camera) : null;
-  const enemy = pickedEnemy && fog.isRevealed(pickedEnemy.x, pickedEnemy.z) ? pickedEnemy : null;
+  const tapsAroundCurrentTarget = pickedEnemy && pickedEnemy === player.combatTarget && enemies.pickShare(pickedEnemy, clientX, clientY, camera) > CURRENT_TARGET_CORE_SHARE;
+  const enemy = pickedEnemy && !tapsAroundCurrentTarget && fog.isRevealed(pickedEnemy.x, pickedEnemy.z) ? pickedEnemy : null;
   if (enemy) {
     engage(enemy);
     return;
@@ -2608,7 +2610,7 @@ function handleTap(clientX, clientY, isNewTouch) {
     return;
   }
   const point = groundPointUnder(clientX, clientY);
-  if (point) setDestination(point.x, point.z);
+  if (point && !setDestination(point.x, point.z) && isNewTouch) hud.log('notice', "Can't find a way there");
 }
 
 const activePointers = new Map();
