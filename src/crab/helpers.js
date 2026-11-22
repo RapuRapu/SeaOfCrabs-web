@@ -555,9 +555,10 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
           helper.load = 0;
           onSound('gatherSeaLettuce', helper);
         }
-        if (!helper.carrying && rack.exists && rack.collect(1)) {
+        const collected = !helper.carrying && rack.exists ? rack.collect() : 0;
+        if (collected) {
           helper.carrying = 'driedKelp';
-          helper.load = 1;
+          helper.load = collected;
         }
         headHome(helper, false);
       }
