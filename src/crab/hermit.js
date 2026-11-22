@@ -607,12 +607,19 @@ export function createHermit(scene, quality, shellLook, { crabModel = 'player', 
 
   const weaponMaterials = new Map();
   let wornWeapon = null;
+  let smallClawItem = null;
 
-  function setClawWeapon(kind) {
+  function weaponMaterialFor(kind) {
+    if (!weaponMaterials.has(kind)) weaponMaterials.set(kind, dressWeaponMaterial(kind, applySeaside(new THREE.MeshStandardMaterial(), { ...wetSurface, gearGlow: weaponGearGlowUniforms })));
+    return weaponMaterials.get(kind);
+  }
+
+  function setClawWeapon(kind, smallKind = null) {
     if (!assetRig) return;
     wornWeapon = kind && weaponModelAvailable(kind) ? kind : null;
-    if (wornWeapon && !weaponMaterials.has(kind)) weaponMaterials.set(kind, dressWeaponMaterial(kind, applySeaside(new THREE.MeshStandardMaterial(), { ...wetSurface, gearGlow: weaponGearGlowUniforms })));
-    assetRig.setClawWeapon(wornWeapon, wornWeapon ? weaponMaterials.get(wornWeapon) : null);
+    smallClawItem = smallKind && weaponModelAvailable(smallKind) ? smallKind : null;
+    assetRig.setClawWeapon(wornWeapon, wornWeapon ? weaponMaterialFor(wornWeapon) : null, 'big');
+    assetRig.setClawWeapon(smallClawItem, smallClawItem ? weaponMaterialFor(smallClawItem) : null, 'small');
   }
 
   function setClawTint(tint) {

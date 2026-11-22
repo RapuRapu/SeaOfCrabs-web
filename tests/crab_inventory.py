@@ -52,7 +52,7 @@ with sync_playwright() as playwright:
     }""")
     print('view', json.dumps(view), flush=True)
     grid = {g['id']: g for g in view['gridGear']}
-    checks['qualityInNames'] = view['wornNames'] == ['Masterwork coral shell + metal plate', 'Masterwork coral-tipped claws + wire binding'] and view['wornStats'][0].startswith('🛡 19') and view['wornStats'][1] == '🗡️ +12'
+    checks['qualityInNames'] = view['wornNames'] == ['Masterwork coral shell + metal plate', 'Masterwork coral-tipped claws + wire binding', 'Empty'] and view['wornStats'][0].startswith('🛡 19') and view['wornStats'][1] == '🗡️ +12 · weight 3'
     checks['tiers'] = grid['702']['tier'] == 'tier-1' and grid['703']['tier'] == 'tier-2' and grid['703']['badge'] == 'T2' and grid['705']['tier'] == 'tier-5 tier-trophy' and grid['705']['badge'] == 'T5' and grid['703']['quality'] == '★' and grid['702']['quality'] == ''
     checks['slotsAndImages'] = len(view['gridGear']) == 3 and all(g['image'] for g in view['gridGear']) and view['materials'] == ['shellBits×8', 'coral×3', 'scrap×5', 'driedKelp×1'] and view['doll']
 

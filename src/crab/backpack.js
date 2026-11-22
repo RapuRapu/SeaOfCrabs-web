@@ -1,10 +1,10 @@
-import { CLAWS } from './gear.js';
+import { CLAWS, HANDS, HAND_LABELS, carryCapacity } from './gear.js';
 import { CONSUMABLES, QUICK_SLOT_COUNT } from './consumables.js';
 import { element } from './workbench.js';
 import { materialEntries, gearEntries, renderSlot, renderItemPopup, attachSlotGestures, salvageAction } from './inventoryView.js';
 import { itemName, itemStatsText, definitionOf, shellDefense, clawAttack } from './itemInfo.js';
 
-export function createBackpackPanel(root, { gear, inventory, thumbnails, onWear, onUnequip, onUse, onAssignQuickSlot, quickSlots, onSalvage, onClose }) {
+export function createBackpackPanel(root, { gear, inventory, thumbnails, onWear, onUnequip, onUse, onAssignQuickSlot, quickSlots, onSalvage, onClose, moltCount = () => 0 }) {
   const overlay = element('div', 'workbench backpack', root);
   const card = element('div', 'workbench-card', overlay);
   const header = element('div', 'workbench-header', card);
@@ -15,29 +15,32 @@ export function createBackpackPanel(root, { gear, inventory, thumbnails, onWear,
   const popupHost = element('div', 'item-popup-host', card);
   let selectedKey = null;
 
-  const wornEntry = (category) => {
-    const item = category === 'shell' ? gear.wornShell() : gear.wornClaws();
-    if (!item || (category === 'claws' && !CLAWS[item.kind].cost)) return null;
-    return { key: `item:${item.id}`, kind: 'gear', category, item, worn: true };
+  const wornEntry = (slot) => {
+    const item = slot === 'shell' ? gear.wornShell() : gear.heldIn(slot);
+    if (!item) return null;
+    return { key: `item:${item.id}`, kind: 'gear', category: slot === 'shell' ? 'shell' : 'claws', hand: slot === 'shell' ? null : slot, item, worn: true };
   };
+  const capacityOf = (hand) => carryCapacity(hand, moltCount());
+  const fitsIn = (item, hand) => (CLAWS[item.kind].weight || 0) <= capacityOf(hand);
 
   function allEntries() {
-    return [...gearEntries(gear.state.shells.filter((item) => item.id !== gear.state.wornShellId), gear.state.claws.filter((item) => item.id !== gear.state.wornClawsId)), ...materialEntries(inventory())];
+    return [...gearEntries(gear.state.shells.filter((item) => !gear.isWorn(item.id)), gear.state.claws.filter((item) => !gear.isWorn(item.id))), ...materialEntries(inventory())];
   }
 
   function entryFor(key) {
-    return [wornEntry('shell'), wornEntry('claws'), ...allEntries()].find((entry) => entry && entry.key === key) || null;
+    return [wornEntry('shell'), wornEntry('big'), wornEntry('small'), ...allEntries()].find((entry) => entry && entry.key === key) || null;
   }
 
-  function wearEntry(entry) {
+  function wearEntry(entry, hand = null) {
     if (entry.kind !== 'gear') return;
     selectedKey = null;
-    onWear(entry.item.id);
+    if (entry.category === 'shell') return onWear(entry.item.id);
+    onWear(entry.item.id, hand || (fitsIn(entry.item, 'big') || !fitsIn(entry.item, 'small') ? 'big' : 'small'));
   }
 
   function unequipEntry(entry) {
     selectedKey = null;
-    onUnequip(entry.category);
+    onUnequip(entry.hand === 'small' ? 'small' : entry.category);
   }
 
   function compareWithWorn(entry) {
@@ -48,6 +51,7 @@ export function createBackpackPanel(root, { gear, inventory, thumbnails, onWear,
       const wornDefense = worn ? shellDefense(definitionOf('shell', worn.kind), worn) : 0;
       return shellDefense(definition, entry.item) - wornDefense || null;
     }
+    if (definition.shield) return null;
     const worn = gear.wornClaws();
     return clawAttack(definition, entry.item) - clawAttack(definitionOf('claws', worn.kind), worn) || null;
   }
@@ -70,21 +74,30 @@ export function createBackpackPanel(root, { gear, inventory, thumbnails, onWear,
       selectedKey = null;
       onSalvage(entry.item.id);
     });
-    return [{ label: 'Wear', data: { wear: String(entry.item.id) }, run: () => wearEntry(entry) }, ...(salvage ? [salvage] : [])];
+    if (entry.category === 'shell') return [{ label: 'Wear', data: { wear: String(entry.item.id) }, run: () => wearEntry(entry) }, ...(salvage ? [salvage] : [])];
+    const handActions = HANDS.map((hand) => {
+      const weight = CLAWS[entry.item.kind].weight || 0;
+      const fits = fitsIn(entry.item, hand);
+      return { label: fits ? HAND_LABELS[hand] : `${HAND_LABELS[hand]} — too heavy ${weight}/${capacityOf(hand)}`, secondary: !fits, data: { wear: String(entry.item.id), hand }, run: () => wearEntry(entry, hand) };
+    });
+    return [...handActions, ...(salvage ? [salvage] : [])];
   }
 
-  function renderEquipSlot(parent, category) {
-    const entry = wornEntry(category);
+  function renderEquipSlot(parent, slot) {
+    const entry = wornEntry(slot);
+    const category = slot === 'shell' ? 'shell' : 'claws';
     const holder = element('div', 'equip-slot', parent);
-    element('div', 'equip-label', holder, category === 'shell' ? 'Shell' : 'Claws');
+    holder.dataset.slot = slot;
+    const weight = entry && slot !== 'shell' ? CLAWS[entry.item.kind].weight || 0 : 0;
+    element('div', 'equip-label', holder, slot === 'shell' ? 'Shell' : `${HAND_LABELS[slot]} ${weight}/${capacityOf(slot)}`);
     if (entry) {
       renderSlot(holder, entry, thumbnails, { selected: entry.key === selectedKey, zone: 'worn' });
       element('div', 'equip-name', holder, itemName(category, entry.item));
       element('div', 'equip-stats', holder, itemStatsText(category, entry.item));
     } else {
-      element('div', 'slot-cell empty-cell', holder, category === 'shell' ? '—' : '🦀');
-      element('div', 'equip-name', holder, category === 'shell' ? 'No shell' : 'Bare claws');
-      element('div', 'equip-stats', holder, category === 'shell' ? '🛡 0 · exposed!' : '🗡️ +0');
+      element('div', 'slot-cell empty-cell', holder, slot === 'shell' ? '—' : '🦀');
+      element('div', 'equip-name', holder, slot === 'shell' ? 'No shell' : 'Empty');
+      element('div', 'equip-stats', holder, slot === 'shell' ? '🛡 0 · exposed!' : '🗡️ +0');
     }
   }
 
@@ -95,12 +108,13 @@ export function createBackpackPanel(root, { gear, inventory, thumbnails, onWear,
     const dollFrame = element('div', 'doll-frame', dollColumn);
     const wornShell = gear.wornShell();
     const wornClaws = gear.wornClaws();
-    const dollImage = thumbnails.dollImage(wornShell, wornClaws);
+    const dollImage = thumbnails.dollImage(wornShell, wornClaws, gear.wornSmall());
     if (dollImage) element('img', 'doll-image', dollFrame).src = dollImage;
     else element('div', 'doll-fallback', dollFrame, '🦀');
     const equipRow = element('div', 'equip-row', dollColumn);
     renderEquipSlot(equipRow, 'shell');
-    renderEquipSlot(equipRow, 'claws');
+    renderEquipSlot(equipRow, 'big');
+    renderEquipSlot(equipRow, 'small');
     const gridColumn = element('div', 'grid-column', layout);
     const entries = allEntries();
     element('div', 'section-title grid-title', gridColumn, `${entries.length} items · tap to inspect · double-tap to wear`);

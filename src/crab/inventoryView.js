@@ -49,7 +49,7 @@ export function renderSlot(parent, entry, thumbnails, { selected = false, zone =
   if (image) element('img', 'slot-image', slot).src = image;
   else element('div', 'slot-emoji', slot, entry.category === 'shell' ? '🐚' : '🦀');
   element('div', 'slot-tier', slot, tierBadge(definition));
-  element('div', 'slot-category', slot, entry.category === 'claws' ? '🗡️' : '🛡️');
+  element('div', 'slot-category', slot, entry.category === 'claws' && !CLAWS[entry.item.kind].shield ? '🗡️' : '🛡️');
   if (modificationOf(entry.category, entry.item)) element('div', 'slot-modification', slot, '+');
   const badge = qualityBadge(entry.item);
   if (badge) element('div', `slot-quality quality-${entry.item.quality}`, slot, badge);

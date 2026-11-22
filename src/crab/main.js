@@ -20,7 +20,7 @@ import { createHud } from './hud.js';
 import { createTracks } from './tracks.js';
 import { createRipples } from './ripples.js';
 import { CONSUMABLES, QUICK_SLOT_COUNT } from './consumables.js';
-import { createGear, SHELLS, CLAWS, QUALITIES, REINFORCEMENTS, qualityFactor, shellDefenseOf, canAfford, BOSS_TROPHIES, MINIBOSS_MATERIALS, BOSS_MATERIAL_DROP, BOSS_ITEM_CHANCE, gearGlowLook, normalizeItem } from './gear.js';
+import { createGear, SHELLS, CLAWS, QUALITIES, REINFORCEMENTS, qualityFactor, shellDefenseOf, canAfford, BOSS_TROPHIES, MINIBOSS_MATERIALS, BOSS_MATERIAL_DROP, BOSS_ITEM_CHANCE, gearGlowLook, normalizeItem, HAND_LABELS, carryCapacity, shieldArmourOf } from './gear.js';
 import { createWorkbenchModel, createWorkbenchPanel } from './workbench.js';
 import { createBackpackPanel } from './backpack.js';
 import { createStatusPanel } from './statusPanel.js';
@@ -386,7 +386,7 @@ function applyWornLook() {
   hermit.setShell(gear.wornLook());
   hermit.setGearGlow(gearGlowLook(gear.wornShell()), gearGlowLook(gear.wornClaws()));
   hermit.setClawGrowth(1 + CLAW_GROWTH_PER_MOLT * progression.moltCount('crusher'), 1 + CLAW_GROWTH_PER_MOLT * progression.moltCount('cutter'));
-  hermit.setClawWeapon(gear.wornClaws().kind);
+  hermit.setClawWeapon(gear.wornClaws().kind, gear.wornSmall() ? gear.wornSmall().kind : null);
   hermit.setClawTint(CLAWS[gear.wornClaws().kind].tint || null);
   showHermitUnderground();
   hermit.setClawTines(Boolean(CLAWS[gear.wornClaws().kind].tines));
@@ -600,9 +600,8 @@ const helpersPanel = createHelpersPanel(hud.root, {
   },
   gearOptions: (helper, category) => {
     const owned = category === 'shell' ? gear.state.shells : gear.state.claws;
-    const wornId = category === 'shell' ? gear.state.wornShellId : gear.state.wornClawsId;
     const current = helper.gear && helper.gear[category];
-    const candidates = owned.filter((item) => item.id !== wornId && (category === 'shell' || CLAWS[item.kind].cost));
+    const candidates = owned.filter((item) => !gear.isWorn(item.id) && (category === 'shell' || (CLAWS[item.kind].cost && !CLAWS[item.kind].shield)));
     return [...(current ? [current] : []), ...candidates].map((item) => ({ value: item.id, label: itemName(category, item) }));
   },
   helperInfo: (helper) => {
@@ -644,8 +643,7 @@ function equipHelper(id, category, itemId) {
   let next = null;
   if (itemId) {
     const index = owned.findIndex((item) => item.id === itemId);
-    const wornId = category === 'shell' ? gear.state.wornShellId : gear.state.wornClawsId;
-    if (index < 0 || owned[index].id === wornId) return false;
+    if (index < 0 || gear.isWorn(owned[index].id)) return false;
     next = owned.splice(index, 1)[0];
   }
   if (previous) owned.push(previous);
@@ -737,6 +735,7 @@ const backpack = createBackpackPanel(hud.root, {
   thumbnails,
   onWear: wearItem,
   onUnequip: unequipItem,
+  moltCount: () => progression.state.molts.length,
   onUse: useConsumable,
   onAssignQuickSlot: assignQuickSlot,
   quickSlots: () => quickSlots(),
@@ -1709,8 +1708,13 @@ function dismantleStructure(target) {
   return true;
 }
 
-function wearItem(id) {
-  if (!gear.wear(id)) return false;
+function wearItem(id, hand = 'big') {
+  const problem = gear.state.claws.some((item) => item.id === id) && gear.wearProblem(id, hand, progression.state.molts.length);
+  if (problem) {
+    hud.log('notice', problem);
+    return false;
+  }
+  if (!gear.wear(id, hand, progression.state.molts.length)) return false;
   applyWornLook();
   backpack.render();
   persist();
@@ -1810,14 +1814,21 @@ const rollDamage = (attack, defense) => rollDamageDetailed(attack, defense).dama
 const roundedText = (value) => String(Math.round(value * 10) / 10);
 const rollText = (spread) => `roll ${Math.round(spread * 100)} %`;
 
+const HANDS_HOLDING_SHIELD = () => ['big', 'small'].map((hand) => gear.heldIn(hand)).filter((item) => item && CLAWS[item.kind].shield);
+
+function shieldParts() {
+  return HANDS_HOLDING_SHIELD().map((item) => `${CLAWS[item.kind].label.toLowerCase()} +${shieldArmourOf(CLAWS[item.kind], item)}`);
+}
+
 function armourParts() {
   const item = gear.wornShell();
-  if (!item) return isSoft() ? 'no shell, soft skin' : 'no shell';
+  if (!item) return [isSoft() ? 'no shell, soft skin' : 'no shell', ...shieldParts()].join(', ');
   const definition = gear.wornShellDefinition();
   const qualityDefense = Math.round(definition.defense * qualityFactor(item));
   const parts = [`${QUALITIES[item.quality || 'fine'].label} ${definition.label.toLowerCase()} ${qualityDefense}`];
   const reinforcementBonus = shellDefenseOf(definition, item) - qualityDefense;
   if (reinforcementBonus) parts.push(`${REINFORCEMENTS[item.reinforcement].label.toLowerCase()} +${reinforcementBonus}`);
+  parts.push(...shieldParts());
   if (isSoft()) parts.push(`soft skin ×${SOFT_DEFENSE_FACTOR}`);
   return parts.join(', ');
 }
@@ -1848,13 +1859,14 @@ function strike(enemy) {
   player.hitCount++;
   const isSting = stats.ability && stats.ability.id === 'sting' && player.hitCount % (stats.ability.everyHits || STING_EVERY_HITS) === 0;
   const pierces = Boolean(stats.ability && stats.ability.pierce);
-  const roll = rollDamageDetailed(stats.attack, pierces ? 0 : enemy.definition.defense);
+  const hand = stats.strikingHands[player.hitCount % stats.strikingHands.length];
+  const roll = rollDamageDetailed(stats.handAttack[hand], pierces ? 0 : enemy.definition.defense);
   const damage = roll.damage * (isSting ? 2 : 1);
   const armourText = pierces ? 'armour pierced' : `its armour ${enemy.definition.defense || 0} blocks ${roundedText(roll.blocked)}`;
-  hud.log('combat', `You hit ${enemy.definition.label} for ${damage} — attack ${stats.attack}, ${armourText}, ${rollText(roll.spread)}${isSting ? ', sting ×2' : ''}`);
+  hud.log('combat', `You hit ${enemy.definition.label} for ${damage} — ${stats.strikingHands.length > 1 ? `${HAND_LABELS[hand].toLowerCase()}, ` : ''}attack ${stats.handAttack[hand]}, ${armourText}, ${rollText(roll.spread)}${isSting ? ', sting ×2' : ''}`);
   player.lastCombatTime = simulationTime;
   floatAt(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight * 0.7, enemy.z, isSting ? `${damage}!` : String(damage), isSting ? 'sting' : 'dealt');
-  hermit.playAttack(isSting ? 'both' : player.hitCount % 2 ? 'big' : 'small');
+  hermit.playAttack(isSting ? 'both' : hand);
   soundAt('clawSnap', enemy.x, enemy.z);
   soundAt(isSting ? 'stingHit' : 'hitThud', enemy.x, enemy.z);
   enemies.damage(enemy, damage, simulationTime, player);
@@ -1869,6 +1881,14 @@ function strike(enemy) {
 function hitPlayer(enemy) {
   if (player.dyingTimer > 0) return;
   const stats = playerStats();
+  if (stats.blockChance && Math.random() < stats.blockChance) {
+    const shield = HANDS_HOLDING_SHIELD().map((item) => CLAWS[item.kind].label.toLowerCase()).join(' and ');
+    hud.log('combat', `Your ${shield} blocks ${enemy.definition.label} — ${Math.round(stats.blockChance * 100)}% block chance`);
+    floatAt(player.x, player.y + 2.4, player.z, 'Blocked', 'experience');
+    soundAt('hitThud', player.x, player.z);
+    player.lastCombatTime = simulationTime;
+    return;
+  }
   const roll = rollDamageDetailed(enemy.definition.attack, stats.defense);
   let damage = roll.damage;
   const modifiers = [];
@@ -3073,7 +3093,7 @@ if (isScreenshotMode) {
 
 window.__debug = {
   hud, setShowPerformance, surfacePointAbovePlayer, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
-  tracks, ripples, hermit, gear, workshop, workbenchPanel, salvageItem, startMovingStructure, dismantleStructure, removeTravelPoint, startMovingExit, handleTravelAction, travelActions, moveStationTo, moveRackTo, isRecipeDiscovered, placement, cancelPlacement, backpack, openBackpack, buildWorkshop, craftItem, wearItem, unequipItem, walkToWorkshop, setDestination, setPaused, handleTap, renderScene, updateCamera, seaLevelAt,
+  tracks, ripples, hermit, gear, hitPlayer, strike, workshop, workbenchPanel, salvageItem, startMovingStructure, dismantleStructure, removeTravelPoint, startMovingExit, handleTravelAction, travelActions, moveStationTo, moveRackTo, isRecipeDiscovered, placement, cancelPlacement, backpack, openBackpack, buildWorkshop, craftItem, wearItem, unequipItem, walkToWorkshop, setDestination, setPaused, handleTap, renderScene, updateCamera, seaLevelAt,
   audio, isAudioUnlocked: () => audioUnlocked, progression, statusPanel, difficultyOf, experienceForKill, enemies, remains, engage, die, recoverRemains, playerStats, randomSource, upgradeTools, refineItem, modifyItem, startMolt, finishMolt, isMolting, isSoft, moltPanel, rack, rackPanel, buildRackStation, eatKelp, useConsumable, craftSupply, assignQuickSlot, quickSlots, isWellFed, walkToRack, helpers, helpersPanel, equipHelper, openMap, startFillMode, startFillCell, startSleeping, wakeUp, isRested, mapView, fog, exitCellProblem, chooseStation, nearestTravelPoint, rescueHelperAt, walkToStranded, burrow, storage, storagePanel, buildPanel, enterBurrow, exitBurrow, travel, travelOption, walkToShaft, cameraDistanceFor, getCameraDistance: () => cameraDistance, digEntranceAt, chooseEntranceSpot, startEntrancePlacement, buildStation, startDigCell, previewEntranceSpot, walkToEntrance, walkToStation, isUnderground: () => underground, entranceSpotProblem, wakeSpot, persist, startOver,
   setCameraDistance: (distance) => { cameraDistance = distance; },
   setRendering: (enabled) => { rendersFrames = enabled; },
@@ -3085,6 +3105,7 @@ window.__debug = {
     gear.state.claws = [{ id: 2, kind: 'bare', quality: 'fine' }, { id: 501, kind: clawKind, quality: invested ? 'masterwork' : 'fine', binding: invested && clawKind !== 'bare' ? 'wire' : undefined }];
     gear.state.wornShellId = shellKind ? 500 : null;
     gear.state.wornClawsId = clawKind === 'bare' ? 2 : 501;
+    gear.state.wornSmallId = null;
     progression.state.molts = Array(progression.moltsEarned()).fill('crusher');
     progression.state.clawSkill = EXPECTED_CLAW_SKILL_PER_LEVEL * progression.state.level;
     player.softUntil = 0;

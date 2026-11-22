@@ -1,4 +1,4 @@
-import { SHELLS, CLAWS, QUALITIES, BINDINGS, REINFORCEMENTS, shellDefenseOf, clawAttackOf, qualityFactor } from './gear.js';
+import { SHELLS, CLAWS, QUALITIES, BINDINGS, REINFORCEMENTS, shellDefenseOf, clawAttackOf, shieldArmourOf, qualityFactor } from './gear.js';
 
 export const definitionOf = (category, kind) => (category === 'shell' ? SHELLS : CLAWS)[kind];
 
@@ -17,7 +17,7 @@ export function tierBadge(definition) {
 }
 
 export function tierLine(category, definition) {
-  const role = category === 'shell' ? definition.role : 'Claws';
+  const role = category === 'shell' ? definition.role : `${definition.shield ? 'Shield' : 'Claw weapon'} · weight ${definition.weight || 0}`;
   return `${definition.trophy ? 'Boss trophy · ' : ''}Tier ${itemTier(definition)} · ${role}`;
 }
 
@@ -43,7 +43,8 @@ export function modificationOf(category, item) {
 export function itemStatsText(category, item) {
   const definition = definitionOf(category, item.kind);
   if (category === 'shell') return `🛡 ${shellDefense(definition, item)} · 🏃 ${percentText(definition.speedFactor * ((modificationOf(category, item) || {}).speedFactor || 1))} · 🗡️ ×${definition.attackFactor.toFixed(2)}`;
-  return `🗡️ +${clawAttack(definition, item)}`;
+  if (definition.shield) return `🛡 +${shieldArmourOf(definition, item)} · block ${percentText(definition.blockChance)} · weight ${definition.weight}`;
+  return `🗡️ +${clawAttack(definition, item)} · weight ${definition.weight || 0}`;
 }
 
 export function itemStatsBreakdown(category, item) {

@@ -294,7 +294,7 @@ export function createWorkbenchPanel(root, { gear, inventory, isDiscovered, onCr
   }
 
   function isWorn(item) {
-    return item.id === gear.state.wornShellId || item.id === gear.state.wornClawsId;
+    return gear.isWorn(item.id);
   }
 
   const improveState = { expandedId: null, lastResult: null };

@@ -110,13 +110,13 @@ export function createStoragePanel(root, { gear, inventory, storage: defaultStor
       }
     }
     for (const item of gear.state.shells.filter((shellItem) => shellItem.id !== gear.state.wornShellId)) storeItem(item.id, false);
-    for (const item of gear.state.claws.filter((clawItem) => clawItem.id !== gear.state.wornClawsId && CLAWS[clawItem.kind].cost)) storeItem(item.id, false);
+    for (const item of gear.state.claws.filter((clawItem) => !gear.isWorn(clawItem.id) && CLAWS[clawItem.kind].cost)) storeItem(item.id, false);
     onChange();
   }
 
   function storeItem(id, notify = true) {
     const found = gear.findItem(id);
-    if (!found || id === gear.state.wornShellId || id === gear.state.wornClawsId) return;
+    if (!found || gear.isWorn(id)) return;
     if (found.category === 'shell') {
       gear.state.shells = gear.state.shells.filter((item) => item.id !== id);
       storage.shells.push(found.item);
@@ -153,7 +153,7 @@ export function createStoragePanel(root, { gear, inventory, storage: defaultStor
     onChange();
   }
 
-  const backpackEntries = () => [...gearEntries(gear.state.shells.filter((item) => item.id !== gear.state.wornShellId), gear.state.claws.filter((item) => item.id !== gear.state.wornClawsId)), ...materialEntries(inventory())];
+  const backpackEntries = () => [...gearEntries(gear.state.shells.filter((item) => !gear.isWorn(item.id)), gear.state.claws.filter((item) => !gear.isWorn(item.id))), ...materialEntries(inventory())];
   const storageEntries = () => [...gearEntries(storage.shells, storage.claws), ...materialEntries(storage.inventory)];
 
   function entryFor(key, zone) {

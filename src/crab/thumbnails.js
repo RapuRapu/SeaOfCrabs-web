@@ -71,7 +71,7 @@ export function createThumbnails(quality) {
       object = new THREE.Mesh(built.geometry, new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, side: THREE.DoubleSide }));
     } else if (weaponModelAvailable(kind)) {
       object = new THREE.Mesh(weaponModel(kind).geometry.clone(), dressWeaponMaterial(kind, new THREE.MeshStandardMaterial(), { thumbnail: true }));
-      object.rotation.set(0.5, kind === 'cleaver' ? 0.4 : -0.9, kind === 'cleaver' ? 0.6 : 0);
+      object.rotation.set(0.5, kind === 'cleaver' ? 0.4 : CLAWS[kind].shield ? 0.3 : -0.9, kind === 'cleaver' ? 0.6 : 0);
     } else {
       const definition = CLAWS[kind];
       object = buildClawPreview(definition.tint || null, Boolean(definition.tines));
@@ -89,15 +89,16 @@ export function createThumbnails(quality) {
     return image;
   }
 
-  function dollImage(shellItem, clawItem) {
+  function dollImage(shellItem, clawItem, smallItem = null) {
     const shellKind = shellItem ? shellItem.kind : null;
     const clawKind = clawItem.kind;
-    const key = `doll:${shellKind}:${clawKind}:${shellItem ? shellItem.quality : ''}:${clawItem.quality}`;
+    const smallKind = smallItem ? smallItem.kind : null;
+    const key = `doll:${shellKind}:${clawKind}:${smallKind}:${shellItem ? shellItem.quality : ''}:${clawItem.quality}`;
     if (cache.has(key)) return cache.get(key);
     if (!ensureStage()) return null;
     if (!doll) doll = createHermit(scene, quality, NAKED.look);
     doll.setShell(shellKind ? SHELLS[shellKind].look : NAKED.look);
-    doll.setClawWeapon(clawKind);
+    doll.setClawWeapon(clawKind, smallKind);
     doll.setClawTint(CLAWS[clawKind].tint || null);
     doll.setClawTines(Boolean(CLAWS[clawKind].tines));
     doll.setGearGlow(gearGlowLook(shellItem), gearGlowLook(clawItem));

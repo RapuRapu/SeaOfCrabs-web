@@ -63,11 +63,26 @@ export const NAKED = {
 };
 
 export const CLAWS = {
-  bare: { label: 'Bare claws', attackBonus: 0, cost: null },
-  shellEdged: { label: 'Shell-edged claws', attackBonus: 4, cost: { shellBits: 6, driftwood: 4 } },
-  coralTipped: { label: 'Coral-tipped claws', tier: 2, attackBonus: 8, cost: { coral: 5, seaGlass: 2, driftwood: 2 }, tint: [1.7, 1.25, 1.6] },
-  cleaver: { label: 'Cleaver claws', tier: 5, trophy: 'cook', attackBonus: 24, cost: { apronScrap: 2, scrap: 6, fishBone: 4 }, tint: [1.25, 1.3, 1.4] },
+  bare: { label: 'Bare claws', attackBonus: 0, weight: 0, cost: null },
+  shellEdged: { label: 'Shell-edged claws', attackBonus: 4, weight: 2, cost: { shellBits: 6, driftwood: 4 } },
+  coralTipped: { label: 'Coral-tipped claws', tier: 2, attackBonus: 8, weight: 3, cost: { coral: 5, seaGlass: 2, driftwood: 2 }, tint: [1.7, 1.25, 1.6] },
+  cleaver: { label: 'Cleaver claws', tier: 5, trophy: 'cook', attackBonus: 24, weight: 6, cost: { apronScrap: 2, scrap: 6, fishBone: 4 }, tint: [1.25, 1.3, 1.4] },
+  shellShield: { label: 'Clam shield', shield: true, attackBonus: 0, armour: 3, blockChance: 0.1, weight: 2, cost: { shellBits: 6, driftwood: 3 } },
+  lobsterShield: { label: 'Lobster shield', shield: true, tier: 3, attackBonus: 0, armour: 8, blockChance: 0.15, weight: 5, cost: { lobsterPlate: 2, scrap: 3 } },
 };
+
+export const HANDS = ['big', 'small'];
+export const HAND_LABELS = { big: 'Big claw', small: 'Small claw' };
+export const SMALL_CLAW_DAMAGE_SHARE = 0.6;
+const BASE_CARRY = { big: 6, small: 3 };
+
+export function carryCapacity(hand, moltCount) {
+  return BASE_CARRY[hand] + (hand === 'big' ? moltCount : Math.floor(moltCount / 2));
+}
+
+export function shieldArmourOf(definition, item) {
+  return Math.round((definition.armour || 0) * qualityFactor(item));
+}
 
 export const BOSS_TROPHIES = {
   cook: { material: 'apronScrap', category: 'claws', kind: 'cleaver' },
@@ -178,6 +193,7 @@ function createEmptyGear() {
     claws: [{ id: 2, kind: 'bare', quality: 'fine' }],
     wornShellId: 1,
     wornClawsId: 2,
+    wornSmallId: null,
     toolTier: 1,
   };
 }
@@ -185,10 +201,38 @@ function createEmptyGear() {
 export function createGear(saved) {
   const state = saved ? structuredClone(saved) : createEmptyGear();
   state.toolTier = state.toolTier || 1;
+  if (state.wornSmallId === undefined) state.wornSmallId = null;
   for (const item of [...state.shells, ...state.claws]) normalizeItem(item);
 
   const wornShell = () => state.shells.find((item) => item.id === state.wornShellId);
   const wornClaws = () => state.claws.find((item) => item.id === state.wornClawsId);
+  const wornSmall = () => (state.wornSmallId ? state.claws.find((item) => item.id === state.wornSmallId) || null : null);
+  const bareItem = () => state.claws.find((item) => !CLAWS[item.kind].cost);
+  const isWorn = (id) => id === state.wornShellId || id === state.wornClawsId || id === state.wornSmallId;
+  const heldIn = (hand) => {
+    const item = hand === 'big' ? wornClaws() : wornSmall();
+    return item && CLAWS[item.kind].cost ? item : null;
+  };
+
+  function wearProblem(id, hand, moltCount = 0) {
+    const item = state.claws.find((candidate) => candidate.id === id);
+    if (!item) return 'missing';
+    const weight = CLAWS[item.kind].weight || 0;
+    const capacity = carryCapacity(hand, moltCount);
+    return weight > capacity ? `Too heavy for ${HAND_LABELS[hand].toLowerCase()} (${weight}/${capacity})` : null;
+  }
+
+  function wearInHand(id, hand, moltCount = 0) {
+    if (wearProblem(id, hand, moltCount)) return false;
+    if (hand === 'big') {
+      if (state.wornSmallId === id) state.wornSmallId = null;
+      state.wornClawsId = id;
+    } else {
+      if (state.wornClawsId === id) state.wornClawsId = bareItem().id;
+      state.wornSmallId = CLAWS[state.claws.find((item) => item.id === id).kind].cost ? id : null;
+    }
+    return true;
+  }
 
   function craft(category, kind, inventory) {
     const definition = (category === 'shell' ? SHELLS : CLAWS)[kind];
@@ -205,9 +249,9 @@ export function createGear(saved) {
     return item;
   }
 
-  function wear(id) {
+  function wear(id, hand = 'big', moltCount = Infinity) {
     if (state.shells.some((item) => item.id === id)) state.wornShellId = id;
-    else if (state.claws.some((item) => item.id === id)) state.wornClawsId = id;
+    else if (state.claws.some((item) => item.id === id)) return wearInHand(id, hand, moltCount);
     else return false;
     return true;
   }
@@ -218,7 +262,12 @@ export function createGear(saved) {
       state.wornShellId = null;
       return true;
     }
-    const bare = state.claws.find((item) => !CLAWS[item.kind].cost);
+    if (category === 'small') {
+      if (!state.wornSmallId) return false;
+      state.wornSmallId = null;
+      return true;
+    }
+    const bare = bareItem();
     if (!bare || state.wornClawsId === bare.id) return false;
     state.wornClawsId = bare.id;
     return true;
@@ -234,7 +283,7 @@ export function createGear(saved) {
 
   function salvage(id, inventory) {
     const found = findItem(id);
-    if (!found || id === state.wornShellId || id === state.wornClawsId) return null;
+    if (!found || isWorn(id)) return null;
     const refund = salvageReturn(found.item.kind, found.definition);
     if (!refund) return null;
     const list = found.category === 'shell' ? state.shells : state.claws;
@@ -291,19 +340,33 @@ export function createGear(saved) {
   function stats(levelAttackBonus = 0, { attackMultiplier = 1, attackIntervalFactor = 1, defenseFactor = 1 } = {}) {
     const shellItem = wornShell();
     const shell = wornShellDefinition();
-    const clawsItem = wornClaws();
-    const claws = CLAWS[clawsItem.kind];
-    const binding = clawsItem.binding ? BINDINGS[clawsItem.binding] : null;
+    const handItems = HANDS.map(heldIn).filter(Boolean);
+    const bindings = handItems.map((item) => (item.binding ? BINDINGS[item.binding] : null)).filter(Boolean);
+    const shields = handItems.filter((item) => CLAWS[item.kind].shield);
+    const baseAttack = (BASE_ATTACK + levelAttackBonus) * shell.attackFactor * attackMultiplier;
+    const handAttack = (hand) => {
+      const item = heldIn(hand);
+      const weaponBonus = item && !CLAWS[item.kind].shield ? clawAttackOf(CLAWS[item.kind], item) : 0;
+      return Math.round((baseAttack + weaponBonus * shell.attackFactor * attackMultiplier) * (hand === 'small' && weaponBonus ? SMALL_CLAW_DAMAGE_SHARE : 1));
+    };
+    const weaponHands = HANDS.filter((hand) => heldIn(hand) && !CLAWS[heldIn(hand).kind].shield);
+    const strikingHands = weaponHands.length ? weaponHands : HANDS.filter((hand) => !heldIn(hand));
+    const shieldArmour = shields.reduce((sum, item) => sum + shieldArmourOf(CLAWS[item.kind], item), 0);
+    const blockChance = 1 - shields.reduce((keep, item) => keep * (1 - CLAWS[item.kind].blockChance), 1);
     const reinforcement = shellItem && shellItem.reinforcement ? REINFORCEMENTS[shellItem.reinforcement] : null;
     const thorns = ((shell.ability && shell.ability.thorns) || 0) + ((reinforcement && reinforcement.thorns) || 0);
     return {
-      defense: Math.round((shellItem ? shellDefenseOf(shell, shellItem) : shell.defense) * defenseFactor),
+      defense: Math.round(((shellItem ? shellDefenseOf(shell, shellItem) : shell.defense) + shieldArmour) * defenseFactor),
+      shieldArmour,
+      blockChance,
       speedFactor: shell.speedFactor * ((reinforcement && reinforcement.speedFactor) || 1),
-      attack: Math.round((BASE_ATTACK + levelAttackBonus + clawAttackOf(claws, clawsItem)) * shell.attackFactor * attackMultiplier),
+      attack: handAttack(strikingHands[0]),
+      handAttack: Object.fromEntries(HANDS.map((hand) => [hand, handAttack(hand)])),
+      strikingHands,
       ability: shell.ability,
       thorns,
-      healOnHit: (claws.healOnHit || 0) + ((binding && binding.healOnHit) || 0),
-      attackIntervalFactor: ((claws.ability && claws.ability.attackIntervalFactor) || 1) * ((binding && binding.attackIntervalFactor) || 1) * attackIntervalFactor,
+      healOnHit: bindings.reduce((sum, binding) => sum + (binding.healOnHit || 0), 0),
+      attackIntervalFactor: bindings.reduce((factor, binding) => factor * (binding.attackIntervalFactor || 1), 1) * attackIntervalFactor,
     };
   }
 
@@ -313,11 +376,13 @@ export function createGear(saved) {
       claws: state.claws.filter((item) => CLAWS[item.kind].cost),
       wornShellId: state.wornShellId,
       wornClawsId: state.wornClawsId,
+      wornSmallId: state.wornSmallId,
     };
     state.shells = [];
     state.claws = state.claws.filter((item) => !CLAWS[item.kind].cost);
     state.wornShellId = null;
     state.wornClawsId = state.claws[0].id;
+    state.wornSmallId = null;
     return dropped;
   }
 
@@ -327,6 +392,7 @@ export function createGear(saved) {
     state.claws.push(...dropped.claws);
     if (!wornShell() && dropped.shells.some((item) => item.id === dropped.wornShellId)) state.wornShellId = dropped.wornShellId;
     if (!CLAWS[wornClaws().kind].cost && dropped.claws.some((item) => item.id === dropped.wornClawsId)) state.wornClawsId = dropped.wornClawsId;
+    if (!state.wornSmallId && dropped.wornSmallId && dropped.claws.some((item) => item.id === dropped.wornSmallId)) state.wornSmallId = dropped.wornSmallId;
   }
 
   function hasNewItems() {
@@ -359,6 +425,10 @@ export function createGear(saved) {
     wornShellDefinition,
     wornShell,
     wornClaws,
+    wornSmall,
+    heldIn,
+    isWorn,
+    wearProblem,
     serialize: () => structuredClone(state),
   };
 }

@@ -29,8 +29,9 @@ export function createStatusPanel(root, { progression, combatStats, onClose }) {
 
     const combatSection = element('div', 'status-section', body);
     element('div', 'section-title', combatSection, 'Combat');
-    addRow(combatSection, 'Attack', String(stats.attack));
+    addRow(combatSection, 'Attack', stats.strikingHands.length > 1 ? `${stats.handAttack.big} big / ${stats.handAttack.small} small` : String(stats.attack));
     addRow(combatSection, 'Defense', String(stats.defense));
+    if (stats.blockChance) addRow(combatSection, 'Block chance', percent(stats.blockChance));
     addRow(combatSection, 'Attack speed', percent(1 / stats.attackIntervalFactor));
     addRow(combatSection, 'Move speed', percent(stats.speedFactor));
 

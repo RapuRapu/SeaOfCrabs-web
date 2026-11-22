@@ -29,7 +29,29 @@ export const WEAPON_MODEL_FIT = {
   shellEdged: { length: 1.9, along: 0.55, rotation: [-Math.PI / 2, 0, 0], anchor: [0, 0, 0], metalness: 0, roughness: 0.85, tint: [0.96, 0.86, 0.72], normalScale: 0.5 },
   coralTipped: { length: 2.0, along: 1.0, rotation: [-Math.PI / 2, 0, 0], anchor: [0, 0, 0], metalness: 0, roughness: 0.75 },
   cleaver: { length: 3.4, along: 0.8, rotation: [-0.504, 0.607, 3.041], anchor: [0.75, 0.19, 0], metalness: 0.45, roughness: 0.4, shoulderCarry: true },
+  shellShield: { length: 1.3, along: 0.75, rotation: [0, Math.PI / 2, 0], anchor: [0, 0, 0], metalness: 0, roughness: 0.6, shield: { ribs: 13, flatness: 0.32, oval: 1, color: [0.94, 0.8, 0.68] } },
+  lobsterShield: { length: 1.5, along: 0.75, rotation: [0, Math.PI / 2, 0], anchor: [0, 0, 0], metalness: 0.1, roughness: 0.45, shield: { bands: 5, flatness: 0.4, oval: 1.3, color: [0.78, 0.22, 0.12] } },
 };
+
+function buildShieldModel(shape) {
+  const geometry = new THREE.SphereGeometry(0.95, 40, 14, 0, Math.PI * 2, 0, Math.PI / 2.3);
+  geometry.rotateX(Math.PI / 2);
+  const position = geometry.attributes.position;
+  const point = new THREE.Vector3();
+  for (let index = 0; index < position.count; index++) {
+    point.fromBufferAttribute(position, index);
+    const angle = Math.atan2(point.y, point.x);
+    const radial = Math.hypot(point.x, point.y);
+    const ridge = shape.ribs ? Math.max(0, Math.cos(angle * shape.ribs)) * 0.05 * radial : Math.abs(Math.sin(point.y * shape.bands * 1.6)) * 0.09;
+    point.z = point.z * shape.flatness + ridge;
+    point.y *= shape.oval;
+    position.setXYZ(index, point.x, point.y, point.z);
+  }
+  geometry.computeVertexNormals();
+  const material = new THREE.MeshStandardMaterial();
+  material.color.setRGB(...shape.color, THREE.SRGBColorSpace);
+  return new THREE.Mesh(geometry, material);
+}
 const WEAPON_MODEL_LENGTH = 1.9;
 
 const loadedCrabs = {};
@@ -44,6 +66,7 @@ export async function loadCrabAsset() {
   weapons.scene.traverse((node) => {
     if (node.isMesh && WEAPON_MODEL_FIT[node.name]) weaponModels.set(node.name, node);
   });
+  for (const [kind, fit] of Object.entries(WEAPON_MODEL_FIT)) if (fit.shield) weaponModels.set(kind, buildShieldModel(fit.shield));
   shells.scene.traverse((node) => {
     if (node.isMesh && SHELL_MODEL_FIT[node.name]) shellModels.set(node.name, node);
   });
@@ -62,6 +85,7 @@ export function dressWeaponMaterial(kind, material, { thumbnail = false } = {}) 
   material.roughness = thumbnail ? 0.6 : fit.roughness;
   material.normalScale.copy(source.normalScale).multiplyScalar(fit.normalScale ?? 1);
   if (fit.tint) material.color.setRGB(...fit.tint, THREE.SRGBColorSpace);
+  else if (fit.shield) material.color.copy(source.color);
   material.side = THREE.DoubleSide;
   material.needsUpdate = true;
   return material;
@@ -124,25 +148,26 @@ export function buildAssetRig({ bodyMaterial, clawMaterial, abdomenMaterial, rea
 
   const clawTips = { big: bones.claw_big_tip, small: bones.claw_small_tip };
   const tines = {};
-  let weapon = null;
+  const heldWeapons = { big: null, small: null };
 
-  function setClawWeapon(kind, material) {
-    if (weapon) weapon.removeFromParent();
-    weapon = null;
+  function setClawWeapon(kind, material, which = 'big') {
+    if (heldWeapons[which]) heldWeapons[which].removeFromParent();
+    heldWeapons[which] = null;
     if (!kind || !weaponModels.has(kind)) return;
     const fit = WEAPON_MODEL_FIT[kind];
-    const hand = bones.claw_big_3;
-    const handLength = bones.claw_big_tip.position.length();
-    const scale = (handLength * fit.length) / WEAPON_MODEL_LENGTH;
+    const hand = bones[`claw_${which}_3`];
+    const handLength = bones[`claw_${which}_tip`].position.length();
+    const scale = (bones.claw_big_tip.position.length() * fit.length) / WEAPON_MODEL_LENGTH;
     const mesh = new THREE.Mesh(weaponModels.get(kind).geometry, material);
     mesh.castShadow = true;
     mesh.position.set(-fit.anchor[0], -fit.anchor[1], -fit.anchor[2]).multiplyScalar(scale);
     mesh.scale.setScalar(scale);
-    weapon = new THREE.Group();
+    const weapon = new THREE.Group();
     weapon.rotation.set(...fit.rotation);
     weapon.position.set(0, handLength * fit.along, 0);
     weapon.add(mesh);
     hand.add(weapon);
+    heldWeapons[which] = weapon;
   }
 
   function setClawTines(mesh, which) {
