@@ -20,7 +20,7 @@ import { createHud } from './hud.js';
 import { createTracks } from './tracks.js';
 import { createRipples } from './ripples.js';
 import { CONSUMABLES, QUICK_SLOT_COUNT } from './consumables.js';
-import { createGear, SHELLS, CLAWS, QUALITIES, REINFORCEMENTS, qualityFactor, shellDefenseOf, canAfford, BOSS_TROPHIES, MINIBOSS_MATERIALS, BOSS_MATERIAL_DROP, BOSS_ITEM_CHANCE, gearGlowLook, normalizeItem, HAND_LABELS, carryCapacity, shieldArmourOf } from './gear.js';
+import { createGear, SHELLS, CLAWS, QUALITIES, REINFORCEMENTS, qualityFactor, shellDefenseOf, canAfford, BOSS_TROPHIES, MINIBOSS_MATERIALS, BOSS_MATERIAL_DROP, BOSS_ITEM_CHANCE, gearGlowLook, normalizeItem, HAND_LABELS, carryCapacity, shieldArmourOf, crabSizeOf, sizeLabel, GROWTH_PER_MOLT, shellFit, MOLTS_PER_SIZE } from './gear.js';
 import { createWorkbenchModel, createWorkbenchPanel } from './workbench.js';
 import { createBackpackPanel } from './backpack.js';
 import { createStatusPanel } from './statusPanel.js';
@@ -94,6 +94,10 @@ const BODY_WET_MINIMUM_DEPTH = 0.04;
 const BODY_WET_MAXIMUM_HEIGHT_PER_SIZE = 2.0;
 const BODY_DRYING_SECONDS = 30;
 const PLAYER_ATTACK_REACH = 1.25;
+const CAMERA_GROWTH_PER_MOLT = 0.04;
+const SHELL_SCALE_PER_SIZE_STEP = GROWTH_PER_MOLT * MOLTS_PER_SIZE;
+const SHELL_MIN_FIT_SCALE = 0.55;
+const SPEED_GROWTH_PER_MOLT = 0.02;
 const PLAYER_ATTACK_INTERVAL = 0.9;
 const BOSS_REST_MS = 24 * 3600000;
 const COMMON_DROP_CHANCE = 0.35;
@@ -386,6 +390,9 @@ function applyWornLook() {
   hermit.setShell(gear.wornLook());
   hermit.setGearGlow(gearGlowLook(gear.wornShell()), gearGlowLook(gear.wornClaws()));
   hermit.setClawGrowth(1 + CLAW_GROWTH_PER_MOLT * progression.moltCount('crusher'), 1 + CLAW_GROWTH_PER_MOLT * progression.moltCount('cutter'));
+  hermit.setBodyScale(bodyGrowth());
+  const fit = shellFit(gear.wornShell() ? SHELLS[gear.wornShell().kind] : null, crabSize());
+  hermit.setShellFitScale(Math.max(SHELL_MIN_FIT_SCALE, 1 + SHELL_SCALE_PER_SIZE_STEP * fit.steps));
   hermit.setClawWeapon(gear.wornClaws().kind, gear.wornSmall() ? gear.wornSmall().kind : null);
   hermit.setClawTint(CLAWS[gear.wornClaws().kind].tint || null);
   showHermitUnderground();
@@ -1547,11 +1554,17 @@ function finishMolt() {
   const kind = player.moltKind;
   player.moltTimer = 0;
   player.moltKind = null;
+  const sizeBefore = crabSize();
   if (!progression.molt(kind)) return;
   player.softUntil = simulationTime + SOFT_SECONDS;
   soundAt('levelUp');
   applyWornLook();
-  hud.log('progress', `${MOLT_KINDS[kind].icon} New skin! ${MOLT_KINDS[kind].label} claw grew · soft for ${SOFT_SECONDS / 60} min`);
+  hud.log('progress', `${MOLT_KINDS[kind].icon} New skin! ${MOLT_KINDS[kind].label} claw grew, body ${Math.round(bodyGrowth() * 100)}% · soft for ${SOFT_SECONDS / 60} min`);
+  if (crabSize() > sizeBefore) {
+    hud.log('progress', `You grew to size ${sizeLabel(crabSize())}`);
+    const fit = playerStats().shellFit;
+    if (fit.steps < 0) hud.log('notice', `Your ${SHELLS[gear.wornShell().kind].label.toLowerCase()} is too small now — find a size ${sizeLabel(crabSize())} shell`);
+  }
   refreshHud(null);
   persist();
 }
@@ -1800,8 +1813,22 @@ function updateAudio(deltaTime) {
   audio.setMusicMood(fighting ? 'combat' : !underground && player.z < GULL_MOOD_EDGE_Z ? 'gull' : 'calm');
 }
 
+function moltTotal() {
+  return progression.state.molts.length;
+}
+
+function crabSize() {
+  return crabSizeOf(moltTotal());
+}
+
+function bodyGrowth() {
+  return 1 + GROWTH_PER_MOLT * moltTotal();
+}
+
 function playerStats() {
-  return gear.stats(progression.attackBonus(), { ...progression.combatModifiers(), defenseFactor: isSoft() ? SOFT_DEFENSE_FACTOR : 1 });
+  const stats = gear.stats(progression.attackBonus(), { ...progression.combatModifiers(), defenseFactor: isSoft() ? SOFT_DEFENSE_FACTOR : 1, crabSize: crabSize() });
+  stats.speedFactor *= 1 + SPEED_GROWTH_PER_MOLT * moltTotal();
+  return stats;
 }
 
 function rollDamageDetailed(attack, defense) {
@@ -2146,7 +2173,7 @@ function updatePlayer(deltaTime) {
   if (!combatTarget) player.combatTarget = null;
   let inStrikingRange = false;
   if (combatTarget && !steering) {
-    const reach = PLAYER_ATTACK_REACH + Math.max(combatTarget.definition.radius, combatTarget.definition.bodyReach || 0) + (player.wasInStrikingRange ? STRIKING_RANGE_TOLERANCE : 0);
+    const reach = PLAYER_ATTACK_REACH * bodyGrowth() + Math.max(combatTarget.definition.radius, combatTarget.definition.bodyReach || 0) + (player.wasInStrikingRange ? STRIKING_RANGE_TOLERANCE : 0);
     const distance = Math.hypot(combatTarget.x - player.x, combatTarget.z - player.z);
     if (distance <= reach) {
       inStrikingRange = true;
@@ -2413,8 +2440,9 @@ function updateCamera(deltaTime, snap) {
   cameraFocus.x += (player.x - Math.sin(CAMERA_YAW) * lead - cameraFocus.x) * follow;
   cameraFocus.z += (player.z + Math.cos(CAMERA_YAW) * lead - cameraFocus.z) * follow;
   cameraFocus.y += (player.y + 0.6 - cameraFocus.y) * follow;
-  const horizontal = Math.cos(CAMERA_PITCH) * cameraDistance;
-  camera.position.set(cameraFocus.x + Math.sin(CAMERA_YAW) * horizontal, cameraFocus.y + Math.sin(CAMERA_PITCH) * cameraDistance, cameraFocus.z - Math.cos(CAMERA_YAW) * horizontal);
+  const viewDistance = cameraDistance * (1 + CAMERA_GROWTH_PER_MOLT * moltTotal());
+  const horizontal = Math.cos(CAMERA_PITCH) * viewDistance;
+  camera.position.set(cameraFocus.x + Math.sin(CAMERA_YAW) * horizontal, cameraFocus.y + Math.sin(CAMERA_PITCH) * viewDistance, cameraFocus.z - Math.cos(CAMERA_YAW) * horizontal);
   const minimumHeight = space().heightAt(camera.position.x, camera.position.z) + 2;
   if (camera.position.y < minimumHeight) camera.position.y = minimumHeight;
   camera.lookAt(cameraFocus);

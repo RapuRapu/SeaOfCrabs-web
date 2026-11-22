@@ -1,4 +1,4 @@
-import { SHELLS, CLAWS, QUALITIES, BINDINGS, REINFORCEMENTS, shellDefenseOf, clawAttackOf, shieldArmourOf, qualityFactor } from './gear.js';
+import { SHELLS, CLAWS, QUALITIES, BINDINGS, REINFORCEMENTS, shellDefenseOf, clawAttackOf, shieldArmourOf, qualityFactor, sizeLabel } from './gear.js';
 
 export const definitionOf = (category, kind) => (category === 'shell' ? SHELLS : CLAWS)[kind];
 
@@ -17,7 +17,7 @@ export function tierBadge(definition) {
 }
 
 export function tierLine(category, definition) {
-  const role = category === 'shell' ? definition.role : `${definition.shield ? 'Shield' : 'Claw weapon'} · weight ${definition.weight || 0}`;
+  const role = category === 'shell' ? `${definition.role}${definition.size ? ` · size ${sizeLabel(definition.size)}` : ''}` : `${definition.shield ? 'Shield' : 'Claw weapon'} · weight ${definition.weight || 0}`;
   return `${definition.trophy ? 'Boss trophy · ' : ''}Tier ${itemTier(definition)} · ${role}`;
 }
 

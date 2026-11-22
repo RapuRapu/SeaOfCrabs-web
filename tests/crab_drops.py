@@ -136,6 +136,7 @@ with sync_playwright() as playwright:
       const d = window.__debug; const out = {};
       d.save.inventory = { apronScrap: 2, scrap: 6, fishBone: 4, catWhisker: 2, gullFeather: 2, lobsterPlate: 2 };
       d.gear.state.shells = [{ id: 900, kind: 'snail', quality: 'fine' }];
+      d.progression.state.molts = [];
       const cleaver = d.craftItem('claws', 'cleaver');
       out.crafted = [!!cleaver, !!d.modifyItem(cleaver.id, 'whisker'), !!d.modifyItem(900, 'featherLining')];
       d.wearItem(cleaver.id); d.wearItem(900);

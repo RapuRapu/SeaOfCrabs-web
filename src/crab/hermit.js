@@ -20,6 +20,7 @@ const ANTENNA_FORWARD_TILT = 1.32;
 const LEG_RISE = 0.28;
 const LEG_SPLAY = 0.32;
 const ATTACK_SECONDS = 0.45;
+const GROWTH_SETTLE_RATE = 1.5;
 const SHOULDER_CARRY_JOINTS = [0.5, 1.0, 0, 0.6];
 const SHOULDER_WINDUP_JOINTS = [0.95, 1.35, 0, 0.5];
 const SHOULDER_CHOP_JOINTS = [0.15, 0.45, 0.15, -0.25];
@@ -397,6 +398,19 @@ export function createHermit(scene, quality, shellLook, { crabModel = 'player', 
   const body = new THREE.Group();
   root.add(tilt);
   root.scale.setScalar(scale);
+  let shownGrowth = null;
+  let targetGrowth = 1;
+  function setBodyScale(growth) {
+    targetGrowth = growth;
+    if (shownGrowth === null) shownGrowth = growth;
+    root.scale.setScalar(scale * shownGrowth);
+  }
+
+  function setShellFitScale(factor) {
+    const baseShellScale = assetRig ? ASSET_SHELL_SCALE : 1;
+    shellPivot.scale.setScalar(baseShellScale * factor);
+    shellModelPivot.scale.setScalar(factor);
+  }
   tilt.add(body);
 
   const assetRig = useAsset ? buildAssetRig({ bodyMaterial: material, clawMaterial, abdomenMaterial, rearMaterial, crabModel }) : null;
@@ -508,6 +522,11 @@ export function createHermit(scene, quality, shellLook, { crabModel = 'player', 
   }
 
   function update(deltaTime, { x, y, z, heading, speed, working, gatherType = null, gatherProgress = 0, groundNormal, withdrawn = false }) {
+    if (shownGrowth !== null && shownGrowth !== targetGrowth) {
+      shownGrowth += (targetGrowth - shownGrowth) * Math.min(1, deltaTime * GROWTH_SETTLE_RATE);
+      if (Math.abs(targetGrowth - shownGrowth) < 1e-3) shownGrowth = targetGrowth;
+      root.scale.setScalar(scale * shownGrowth);
+    }
     root.position.set(x, y, z);
     root.rotation.y = heading;
     pose.idleTime += deltaTime;
@@ -628,7 +647,7 @@ export function createHermit(scene, quality, shellLook, { crabModel = 'player', 
     else clawMaterial.color.copy(baseColor);
   }
 
-  return { root, update, wetnessUniforms, setShell, setGearGlow, setClawGrowth, setClawTint, setClawTines, setClawWeapon, playAttack, playHurt, playDeath, resetPose, clawPosition };
+  return { root, update, wetnessUniforms, setShell, setGearGlow, setClawGrowth, setBodyScale, setShellFitScale, setClawTint, setClawTines, setClawWeapon, playAttack, playHurt, playDeath, resetPose, clawPosition };
 }
 
 const ASSET_SHELL_OFFSET = new THREE.Vector3(0, 0, 0);

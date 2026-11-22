@@ -15,7 +15,7 @@ FLOW = r'''
 
   out.cleaverRefusedSmall = d.wearItem(cleaver.id, 'small') === false && d.gear.state.wornSmallId === null;
   out.lobsterRefusedSmall = d.wearItem(lobster.id, 'small') === false;
-  d.progression.state.molts = ['armor', 'armor', 'armor', 'armor'];
+  d.progression.state.molts = ['crusher', 'crusher', 'crusher', 'crusher'];
   out.lobsterFitsAfterMolts = d.wearItem(lobster.id, 'small') === true;
   d.progression.state.molts = [];
   d.unequipItem('small');

@@ -1,3 +1,4 @@
+import { crabSizeOf, sizeLabel, GROWTH_PER_MOLT } from './gear.js';
 import { element, percent } from './workbench.js';
 import { MAX_LEVEL, MAX_CLAW_SKILL } from './progression.js';
 
@@ -26,11 +27,13 @@ export function createStatusPanel(root, { progression, combatStats, onClose }) {
     const toNext = progression.experienceToNext();
     addRow(progressSection, 'Experience', toNext ? `${Math.floor(state.experience)} / ${toNext}` : 'Max level');
     addRow(progressSection, 'Health', `${Math.ceil(Math.max(0, state.health))} / ${progression.maxHealth()}`);
+    addRow(progressSection, 'Size', `${sizeLabel(crabSizeOf(state.molts.length))} · ${Math.round((1 + GROWTH_PER_MOLT * state.molts.length) * 100)}%`);
 
     const combatSection = element('div', 'status-section', body);
     element('div', 'section-title', combatSection, 'Combat');
     addRow(combatSection, 'Attack', stats.strikingHands.length > 1 ? `${stats.handAttack.big} big / ${stats.handAttack.small} small` : String(stats.attack));
     addRow(combatSection, 'Defense', String(stats.defense));
+    if (stats.shellFit && stats.shellFit.label) addRow(combatSection, 'Shell', `${stats.shellFit.label} — slow${stats.shellFit.steps < 0 ? ', weak' : ''}, no ability`);
     if (stats.blockChance) addRow(combatSection, 'Block chance', percent(stats.blockChance));
     addRow(combatSection, 'Attack speed', percent(1 / stats.attackIntervalFactor));
     addRow(combatSection, 'Move speed', percent(stats.speedFactor));

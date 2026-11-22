@@ -1,6 +1,7 @@
 export const SHELLS = {
   snail: {
     label: 'Snail shell',
+    size: 1,
     role: 'Starter',
     defense: 2,
     speedFactor: 1,
@@ -11,6 +12,7 @@ export const SHELLS = {
   },
   turban: {
     label: 'Turban shell',
+    size: 1,
     role: 'Tank',
     defense: 7,
     speedFactor: 0.88,
@@ -21,6 +23,7 @@ export const SHELLS = {
   },
   cone: {
     label: 'Cone shell',
+    size: 1,
     role: 'Striker',
     defense: 3,
     speedFactor: 1.05,
@@ -31,6 +34,7 @@ export const SHELLS = {
   },
   coral: {
     label: 'Coral shell',
+    size: 2,
     tier: 2,
     role: 'Reef tank',
     defense: 12,
@@ -42,6 +46,7 @@ export const SHELLS = {
   },
   whelk: {
     label: 'Spiral whelk',
+    size: 2,
     tier: 2,
     role: 'Reef striker',
     defense: 5,
@@ -70,6 +75,20 @@ export const CLAWS = {
   shellShield: { label: 'Clam shield', shield: true, attackBonus: 0, armour: 3, blockChance: 0.1, weight: 2, cost: { shellBits: 6, driftwood: 3 } },
   lobsterShield: { label: 'Lobster shield', shield: true, tier: 3, attackBonus: 0, armour: 8, blockChance: 0.15, weight: 5, cost: { lobsterPlate: 2, scrap: 3 } },
 };
+
+export const SIZE_LABELS = ['S', 'M', 'L', 'XL', 'XXL'];
+export const MOLTS_PER_SIZE = 3;
+export const GROWTH_PER_MOLT = 0.08;
+export const SHELL_SIZE_PENALTY = { speedFactor: 0.4, smallDefenseFactor: 0.2 };
+
+export const crabSizeOf = (moltCount) => 1 + Math.floor(moltCount / MOLTS_PER_SIZE);
+export const sizeLabel = (size) => SIZE_LABELS[size - 1] || `${size}`;
+
+export function shellFit(shellDefinition, crabSize) {
+  if (!shellDefinition || !shellDefinition.size) return { steps: 0, label: null };
+  const steps = shellDefinition.size - crabSize;
+  return { steps, label: steps < 0 ? 'Too small' : steps > 0 ? 'Too big' : null };
+}
 
 export const HANDS = ['big', 'small'];
 export const HAND_LABELS = { big: 'Big claw', small: 'Small claw' };
@@ -217,6 +236,8 @@ export function createGear(saved) {
   function wearProblem(id, hand, moltCount = 0) {
     const item = state.claws.find((candidate) => candidate.id === id);
     if (!item) return 'missing';
+    const minSize = CLAWS[item.kind].minSize || 1;
+    if (minSize > crabSizeOf(moltCount)) return `Requires size ${sizeLabel(minSize)}`;
     const weight = CLAWS[item.kind].weight || 0;
     const capacity = carryCapacity(hand, moltCount);
     return weight > capacity ? `Too heavy for ${HAND_LABELS[hand].toLowerCase()} (${weight}/${capacity})` : null;
@@ -337,9 +358,13 @@ export function createGear(saved) {
   const wornShellDefinition = () => (wornShell() ? SHELLS[wornShell().kind] : NAKED);
   const wornLook = () => wornShellDefinition().look;
 
-  function stats(levelAttackBonus = 0, { attackMultiplier = 1, attackIntervalFactor = 1, defenseFactor = 1 } = {}) {
+  function stats(levelAttackBonus = 0, { attackMultiplier = 1, attackIntervalFactor = 1, defenseFactor = 1, crabSize = 1 } = {}) {
     const shellItem = wornShell();
     const shell = wornShellDefinition();
+    const fit = shellFit(shellItem ? shell : null, crabSize);
+    const misfit = Math.abs(fit.steps);
+    const fitSpeedFactor = SHELL_SIZE_PENALTY.speedFactor ** misfit;
+    const fitDefenseFactor = fit.steps < 0 ? SHELL_SIZE_PENALTY.smallDefenseFactor ** misfit : 1;
     const handItems = HANDS.map(heldIn).filter(Boolean);
     const bindings = handItems.map((item) => (item.binding ? BINDINGS[item.binding] : null)).filter(Boolean);
     const shields = handItems.filter((item) => CLAWS[item.kind].shield);
@@ -356,15 +381,16 @@ export function createGear(saved) {
     const reinforcement = shellItem && shellItem.reinforcement ? REINFORCEMENTS[shellItem.reinforcement] : null;
     const thorns = ((shell.ability && shell.ability.thorns) || 0) + ((reinforcement && reinforcement.thorns) || 0);
     return {
-      defense: Math.round(((shellItem ? shellDefenseOf(shell, shellItem) : shell.defense) + shieldArmour) * defenseFactor),
+      defense: Math.round(((shellItem ? shellDefenseOf(shell, shellItem) : shell.defense) * fitDefenseFactor + shieldArmour) * defenseFactor),
+      shellFit: fit,
       shieldArmour,
       blockChance,
-      speedFactor: shell.speedFactor * ((reinforcement && reinforcement.speedFactor) || 1),
+      speedFactor: shell.speedFactor * ((reinforcement && reinforcement.speedFactor) || 1) * fitSpeedFactor,
       attack: handAttack(strikingHands[0]),
       handAttack: Object.fromEntries(HANDS.map((hand) => [hand, handAttack(hand)])),
       strikingHands,
-      ability: shell.ability,
-      thorns,
+      ability: misfit ? null : shell.ability,
+      thorns: misfit ? (reinforcement && reinforcement.thorns) || 0 : thorns,
       healOnHit: bindings.reduce((sum, binding) => sum + (binding.healOnHit || 0), 0),
       attackIntervalFactor: bindings.reduce((factor, binding) => factor * (binding.attackIntervalFactor || 1), 1) * attackIntervalFactor,
     };

@@ -1,4 +1,4 @@
-import { CLAWS, HANDS, HAND_LABELS, carryCapacity } from './gear.js';
+import { CLAWS, SHELLS, HANDS, HAND_LABELS, carryCapacity, crabSizeOf, shellFit } from './gear.js';
 import { CONSUMABLES, QUICK_SLOT_COUNT } from './consumables.js';
 import { element } from './workbench.js';
 import { materialEntries, gearEntries, renderSlot, renderItemPopup, attachSlotGestures, salvageAction } from './inventoryView.js';
@@ -21,6 +21,7 @@ export function createBackpackPanel(root, { gear, inventory, thumbnails, onWear,
     return { key: `item:${item.id}`, kind: 'gear', category: slot === 'shell' ? 'shell' : 'claws', hand: slot === 'shell' ? null : slot, item, worn: true };
   };
   const capacityOf = (hand) => carryCapacity(hand, moltCount());
+  const shellFitLabel = (item) => shellFit(SHELLS[item.kind], crabSizeOf(moltCount())).label;
   const fitsIn = (item, hand) => (CLAWS[item.kind].weight || 0) <= capacityOf(hand);
 
   function allEntries() {
@@ -74,7 +75,7 @@ export function createBackpackPanel(root, { gear, inventory, thumbnails, onWear,
       selectedKey = null;
       onSalvage(entry.item.id);
     });
-    if (entry.category === 'shell') return [{ label: 'Wear', data: { wear: String(entry.item.id) }, run: () => wearEntry(entry) }, ...(salvage ? [salvage] : [])];
+    if (entry.category === 'shell') return [{ label: shellFitLabel(entry.item) ? `Wear — ${shellFitLabel(entry.item).toLowerCase()}` : 'Wear', secondary: Boolean(shellFitLabel(entry.item)), data: { wear: String(entry.item.id) }, run: () => wearEntry(entry) }, ...(salvage ? [salvage] : [])];
     const handActions = HANDS.map((hand) => {
       const weight = CLAWS[entry.item.kind].weight || 0;
       const fits = fitsIn(entry.item, hand);
@@ -94,6 +95,7 @@ export function createBackpackPanel(root, { gear, inventory, thumbnails, onWear,
       renderSlot(holder, entry, thumbnails, { selected: entry.key === selectedKey, zone: 'worn' });
       element('div', 'equip-name', holder, itemName(category, entry.item));
       element('div', 'equip-stats', holder, itemStatsText(category, entry.item));
+      if (slot === 'shell' && shellFitLabel(entry.item)) element('div', 'equip-warning', holder, shellFitLabel(entry.item));
     } else {
       element('div', 'slot-cell empty-cell', holder, slot === 'shell' ? '—' : '🦀');
       element('div', 'equip-name', holder, slot === 'shell' ? 'No shell' : 'Empty');
