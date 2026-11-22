@@ -23,8 +23,12 @@ FLOW = r'''
   out.guardedRefused = d.rescueHelperAt(gullSpot) === null;
   for (const enemy of d.enemies.list) if (enemy.kind === 'gull') Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 });
   out.fullNestRefused = d.rescueHelperAt(gullSpot) === null;
+  out.secondNestNeedsHeart = d.stationBuildProblem('helperNest') !== null;
+  Object.assign(d.save.inventory, { pearls: 3, pebbles: 6, clay: 6, driftwood: 8, seaLettuce: 4 });
+  const heartCell = free()[0];
+  d.buildStation('burrowHeart', heartCell.column, heartCell.row);
   const secondCell = free()[0];
-  out.secondNest = d.buildStation('helperNest', secondCell.column, secondCell.row);
+  out.secondNest = out.secondNestNeedsHeart && d.buildStation('helperNest', secondCell.column, secondCell.row);
   out.guardedRescued = Boolean(d.rescueHelperAt(gullSpot));
   out.helperCount = d.helpers.list.length;
   out.jobsAtStart = d.helpers.list.map((helper) => helper.job);

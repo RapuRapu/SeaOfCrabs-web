@@ -6,6 +6,8 @@ import { pickTarget } from './picking.js';
 
 export const RACK_SLOTS = 3;
 export const RACK_BATCH = 3;
+export const RACK_INPUTS = ['seaLettuce', 'kelp'];
+export const rackInputIn = (inventory) => RACK_INPUTS.find((type) => (inventory[type] || 0) >= RACK_BATCH) || null;
 export const RACK_DRY_SECONDS = 60;
 export const RACK_REACH = 2.6;
 export const RACK_BLOCK_RADIUS = 1.3;

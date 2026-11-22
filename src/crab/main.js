@@ -33,8 +33,8 @@ import { createAudio } from './audio.js';
 import { createBurrow, loadBurrowModels, createEmptyBurrow, BURROW_LAYER, BURROW_ORIGIN, ENTRANCE_REACH, ENTRANCE_BLOCK_RADIUS, STATION_KINDS, STATION_REACH, SHAFT_CELL, SHAFT_ACCESS_ROW_STEP, BURROW_CELL, cellCenter } from './burrow.js';
 import { createThumbnails } from './thumbnails.js';
 import { createBuildPanel, createStoragePanel, createHelpersPanel, createRackPanel } from './burrowPanels.js';
-import { createRack, RACK_BATCH, RACK_DRY_SECONDS, RACK_REACH, RACK_BLOCK_RADIUS } from './rack.js';
-import { createHelpers, HELPER_LIMIT, helperStats, helperMaxHealth } from './helpers.js';
+import { createRack, RACK_BATCH, RACK_DRY_SECONDS, RACK_REACH, RACK_BLOCK_RADIUS, rackInputIn } from './rack.js';
+import { createHelpers, HELPER_LIMIT, helperStats, helperMaxHealth, HELPER_MEAL_SECONDS } from './helpers.js';
 import { itemName } from './itemInfo.js';
 import { createFog } from './fog.js';
 import { createMapView } from './mapView.js';
@@ -472,6 +472,7 @@ const enemies = createEnemies({
 const buildPanel = createBuildPanel(hud.root, {
   inventory: () => save.inventory,
   hasStation: (kind) => (STATION_KINDS[kind].surface ? rack.exists : burrow.hasStation(kind)),
+  buildProblem: stationBuildProblem,
   onFill: () => startFillMode(),
   onChoose: chooseStation,
   onClose: () => buildPanel.close(),
@@ -505,8 +506,9 @@ const rackPanel = createRackPanel(hud.root, {
   batch: RACK_BATCH,
   drySeconds: RACK_DRY_SECONDS,
   onLoad: () => {
-    if ((save.inventory.seaLettuce || 0) < RACK_BATCH || !rack.load()) return;
-    save.inventory.seaLettuce -= RACK_BATCH;
+    const input = rackInputIn(save.inventory);
+    if (!input || !rack.load()) return;
+    save.inventory[input] -= RACK_BATCH;
     soundAt('gatherSeaLettuce');
     rackPanel.render();
     persist();
@@ -568,6 +570,15 @@ const helpers = createHelpers(scene, {
   rack,
   burrow,
   boxOf,
+  upkeepActive: () => burrow.hasStation('burrowHeart'),
+  feedHelper: (helper) => {
+    const pantries = burrow.state.stations.filter((station) => station.kind === 'pantry').map((station) => station.box);
+    const nest = burrow.state.stations.find((station) => station.id === helper.nestId);
+    const source = [...pantries, nest && nest.box].find((box) => box && (box.inventory.driedKelp || 0) > 0);
+    if (!source) return false;
+    source.inventory.driedKelp -= 1;
+    return true;
+  },
   strandedSpots: strandedHelperSpots(),
   getPlayer: () => player,
   isUnderground: () => underground,
@@ -614,7 +625,13 @@ const helpersPanel = createHelpersPanel(hud.root, {
   helperInfo: (helper) => {
     const stats = helperStats(helper);
     const level = helper.level || 1;
-    return { level, maxHealth: helperMaxHealth(helper), attack: stats.attack, defense: stats.defense, experience: Math.floor(helper.experience || 0), toNext: level >= MAX_LEVEL ? 0 : experienceForLevel(level) };
+    const food = !burrow.hasStation('burrowHeart') ? null : helper.hungry ? 'Hungry — works at half speed' : `Fed · next meal in ${Math.max(1, Math.ceil((helper.mealIn ?? HELPER_MEAL_SECONDS) / 60))} min`;
+    return { level, maxHealth: helperMaxHealth(helper), attack: stats.attack, defense: stats.defense, experience: Math.floor(helper.experience || 0), toNext: level >= MAX_LEVEL ? 0 : experienceForLevel(level), food, hungry: Boolean(helper.hungry) };
+  },
+  foodSummary: () => {
+    if (!burrow.hasStation('burrowHeart')) return null;
+    const pantryKelp = burrow.state.stations.filter((station) => station.kind === 'pantry').reduce((sum, station) => sum + (station.box.inventory.driedKelp || 0), 0);
+    return `Food: ${pantryKelp} dried kelp in the pantry · each helper eats 1 every ${HELPER_MEAL_SECONDS / 60} min`;
   },
   onEquip: (id, category, itemId) => {
     equipHelper(id, category, itemId);
@@ -664,7 +681,7 @@ function helperJobOptions(helper) {
   const gatherable = Object.entries(RESOURCE_TYPES).filter(([type, definition]) => definition.count > 0 && (known.has(type) || ALWAYS_KNOWN_MATERIALS.has(type))).map(([type, definition]) => ({ value: type, label: `Gather ${definition.label.toLowerCase()}` }));
   const follower = helpers.follower();
   const follow = !follower || follower === helper ? [{ value: 'follow', label: 'Follow and help you' }] : [];
-  return [{ value: '', label: 'No job · rest in the nest' }, ...follow, ...gatherable, { value: 'rack', label: 'Tend the drying rack' }, { value: 'carry', label: 'Carry between boxes' }];
+  return [{ value: '', label: 'No job · rest in the nest' }, ...follow, ...gatherable, { value: 'rack', label: 'Tend station: drying rack' }, { value: 'carry', label: 'Carry between boxes' }];
 }
 
 function stationName(station) {
@@ -1059,7 +1076,7 @@ function chooseEntranceSpot(x, z) {
 
 function buildStation(kind, column, row, { free = false } = {}) {
   const definition = STATION_KINDS[kind];
-  if (!definition || (!definition.multiple && burrow.hasStation(kind)) || (!free && !canAfford(definition.cost, save.inventory))) return false;
+  if (!definition || (!definition.multiple && burrow.hasStation(kind)) || (!free && !canAfford(definition.cost, save.inventory)) || (!free && stationBuildProblem(kind))) return false;
   const exitSpot = kind === 'exit' ? burrow.exitWallSpots().find((spot) => spot.column === column && spot.row === row) : null;
   if (kind === 'exit' && (!exitSpot || exitCellProblem(column, row))) return false;
   if (kind !== 'exit' && !burrow.freeCells().some((cell) => cell.column === column && cell.row === row)) return false;
@@ -1128,7 +1145,25 @@ function walkToRack() {
   return true;
 }
 
+const NEST_LIMIT_BY_STAGE = { 1: 1, 2: 2 };
+const SAND_PER_DUG_CELL = 2;
+const HELPER_MEAL_MINUTES = HELPER_MEAL_SECONDS / 60;
+const HELPER_MEAL = RESOURCE_TYPES.driedKelp;
+const burrowStage = () => (burrow.hasStation('burrowHeart') ? 2 : 1);
+
+function stationBuildProblem(kind) {
+  const definition = STATION_KINDS[kind];
+  if (definition.requires && !burrow.hasStation(definition.requires)) return `Needs ${STATION_KINDS[definition.requires].label}`;
+  if (kind === 'helperNest') {
+    const nests = burrow.state.stations.filter((station) => station.kind === 'helperNest').length;
+    const limit = NEST_LIMIT_BY_STAGE[burrowStage()];
+    if (nests >= limit) return burrowStage() === 1 ? 'One nest until the Burrow heart' : `Nest limit ${limit}`;
+  }
+  return null;
+}
+
 function chooseStation(kind) {
+  if (stationBuildProblem(kind)) return;
   buildPanel.close();
   if (STATION_KINDS[kind].surface) {
     buildRackStation();
@@ -1391,7 +1426,8 @@ function openStation(station) {
   if (station.kind === 'workshop') workbenchPanel.open();
   else if (station.kind === 'exit') hud.bumpTravel();
   else if (station.kind === 'crabBed') startSleeping(station);
-  else if (station.kind === 'helperNest') storagePanel.open(station.box, { station, title: stationName(station) });
+  else if (station.kind === 'helperNest' || station.kind === 'pantry') storagePanel.open(station.box, { station, title: stationName(station) });
+  else if (station.kind === 'burrowHeart') hud.log('progress', `Burrow heart · Colony stage — up to ${NEST_LIMIT_BY_STAGE[2]} nests, helpers eat ${HELPER_MEAL.label.toLowerCase()} every ${HELPER_MEAL_MINUTES} min`);
   else storagePanel.open(storage, { station, title: 'Storage' });
 }
 
@@ -2275,6 +2311,9 @@ function updatePlayer(deltaTime) {
             save.burrowDug = true;
           }
           burrow.finishDig(dig.column, dig.row);
+          save.inventory.sand = (save.inventory.sand || 0) + SAND_PER_DUG_CELL;
+          hud.log('loot', `+${SAND_PER_DUG_CELL} Sand from digging`);
+          refreshHud('sand');
           save.burrow = burrow.serialize();
           persist();
         }
@@ -3122,7 +3161,7 @@ if (isScreenshotMode) {
 window.__debug = {
   hud, setShowPerformance, surfacePointAbovePlayer, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
   tracks, ripples, hermit, gear, hitPlayer, strike, workshop, workbenchPanel, salvageItem, startMovingStructure, dismantleStructure, removeTravelPoint, startMovingExit, handleTravelAction, travelActions, moveStationTo, moveRackTo, isRecipeDiscovered, placement, cancelPlacement, backpack, openBackpack, buildWorkshop, craftItem, wearItem, unequipItem, walkToWorkshop, setDestination, setPaused, handleTap, renderScene, updateCamera, seaLevelAt,
-  audio, isAudioUnlocked: () => audioUnlocked, progression, statusPanel, difficultyOf, experienceForKill, enemies, remains, engage, die, recoverRemains, playerStats, randomSource, upgradeTools, refineItem, modifyItem, startMolt, finishMolt, isMolting, isSoft, moltPanel, rack, rackPanel, buildRackStation, eatKelp, useConsumable, craftSupply, assignQuickSlot, quickSlots, isWellFed, walkToRack, helpers, helpersPanel, equipHelper, openMap, startFillMode, startFillCell, startSleeping, wakeUp, isRested, mapView, fog, exitCellProblem, chooseStation, nearestTravelPoint, rescueHelperAt, walkToStranded, burrow, storage, storagePanel, buildPanel, enterBurrow, exitBurrow, travel, travelOption, walkToShaft, cameraDistanceFor, getCameraDistance: () => cameraDistance, digEntranceAt, chooseEntranceSpot, startEntrancePlacement, buildStation, startDigCell, previewEntranceSpot, walkToEntrance, walkToStation, isUnderground: () => underground, entranceSpotProblem, wakeSpot, persist, startOver,
+  audio, isAudioUnlocked: () => audioUnlocked, progression, statusPanel, difficultyOf, experienceForKill, enemies, remains, engage, die, recoverRemains, playerStats, randomSource, upgradeTools, refineItem, modifyItem, startMolt, finishMolt, isMolting, isSoft, moltPanel, rack, rackPanel, buildRackStation, eatKelp, useConsumable, craftSupply, assignQuickSlot, quickSlots, isWellFed, walkToRack, helpers, helpersPanel, equipHelper, openMap, startFillMode, startFillCell, startSleeping, wakeUp, isRested, mapView, fog, exitCellProblem, chooseStation, nearestTravelPoint, rescueHelperAt, walkToStranded, burrow, storage, storagePanel, buildPanel, enterBurrow, exitBurrow, travel, travelOption, walkToShaft, cameraDistanceFor, getCameraDistance: () => cameraDistance, digEntranceAt, chooseEntranceSpot, startEntrancePlacement, buildStation, stationBuildProblem, burrowStage, startDigCell, previewEntranceSpot, walkToEntrance, walkToStation, isUnderground: () => underground, entranceSpotProblem, wakeSpot, persist, startOver,
   setCameraDistance: (distance) => { cameraDistance = distance; },
   setRendering: (enabled) => { rendersFrames = enabled; },
   isPaused: () => paused,

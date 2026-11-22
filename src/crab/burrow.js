@@ -79,6 +79,8 @@ export const STATION_KINDS = {
   helperNest: { label: 'Helper nest', icon: '🦀', cost: { driftwood: 4, seaLettuce: 2 }, description: 'Home for 3 helper crabs. They sleep here and bring their finds to the nest box.', multiple: true },
   crabBed: { label: 'Crab bed', icon: '🛏️', cost: { seaLettuce: 4, driftwood: 2 }, description: 'Sleep to heal fast. You wake up rested: faster healing and +10% speed for 15 min.' },
   exit: { label: 'Exit', icon: '⬆', cost: { driftwood: 2 }, description: 'A tunnel up to the surface. Only to explored dry sand, and not near bosses.', multiple: true },
+  burrowHeart: { label: 'Burrow heart', icon: '💗', cost: { pearls: 3, pebbles: 6, clay: 6, driftwood: 4 }, description: 'The colony begins: up to 2 helper nests (6 helpers) and the pantry. Helpers start to eat dried kelp.' },
+  pantry: { label: 'Pantry', icon: '🧺', cost: { clay: 4, driftwood: 3 }, description: 'Food store. Helpers eat dried kelp from here before their nest box.', requires: 'burrowHeart' },
   dryingRack: { label: 'Drying rack', icon: '🍂', cost: { driftwood: 4, shellBits: 2 }, description: 'Built in the sun beside your burrow entrance. Dries 3 sea lettuce into 1 dried kelp in 60 s.', surface: true },
 };
 
@@ -264,6 +266,47 @@ function buildNestGeometry() {
   }));
 }
 
+function buildHeartGeometry() {
+  const clayColor = linearColor(0.56, 0.4, 0.3);
+  const clayDark = linearColor(0.36, 0.25, 0.18);
+  const pebble = linearColor(0.6, 0.6, 0.58);
+  const pearl = linearColor(1, 0.95, 0.92);
+  const parts = [];
+  parts.push(colorize(new THREE.CylinderGeometry(0.75, 1.0, 0.7, 14).translate(0, 0.35, 0), (color, x, y) => color.copy(clayDark).lerp(clayColor, y / 0.7)));
+  for (let stone = 0; stone < 9; stone++) {
+    const angle = (stone / 9) * Math.PI * 2;
+    parts.push(colorize(new THREE.IcosahedronGeometry(0.2, 1).scale(1.2, 0.7, 1).translate(Math.cos(angle) * 0.98, 0.1, Math.sin(angle) * 0.98), (color) => color.copy(pebble).multiplyScalar(0.8 + 0.3 * Math.sin(stone * 2.1))));
+  }
+  parts.push(colorize(new THREE.SphereGeometry(0.62, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, 0.7, 1).translate(0, 0.7, 0), (color, x, y, z) => color.copy(clayColor).multiplyScalar(0.9 + 0.15 * Math.sin(Math.atan2(z, x) * 7))));
+  for (let index = 0; index < 3; index++) {
+    const angle = (index / 3) * Math.PI * 2 + 0.4;
+    parts.push(colorize(new THREE.SphereGeometry(0.17, 12, 8).translate(Math.cos(angle) * 0.34, 1.12, Math.sin(angle) * 0.34), (color) => color.copy(pearl)));
+  }
+  return mergeGeometries(parts.map((geometry) => {
+    geometry.deleteAttribute('uv');
+    return geometry.index ? geometry.toNonIndexed() : geometry;
+  }));
+}
+
+function buildPantryGeometry() {
+  const clayColor = linearColor(0.62, 0.42, 0.3);
+  const kelp = linearColor(0.5, 0.36, 0.14);
+  const plank = linearColor(0.5, 0.35, 0.2);
+  const parts = [];
+  parts.push(colorize(new THREE.BoxGeometry(1.9, 0.12, 0.9).translate(0, 0.06, 0), (color) => color.copy(plank)));
+  for (let jar = 0; jar < 3; jar++) {
+    parts.push(colorize(new THREE.SphereGeometry(0.32, 12, 8).scale(1, 1.25, 1).translate(-0.6 + jar * 0.6, 0.45, -0.1), (color, x, y) => color.copy(clayColor).multiplyScalar(0.8 + 0.3 * y)));
+    parts.push(colorize(new THREE.CylinderGeometry(0.14, 0.16, 0.12, 10).translate(-0.6 + jar * 0.6, 0.86, -0.1), (color) => color.copy(clayColor).multiplyScalar(0.7)));
+  }
+  for (let bundle = 0; bundle < 2; bundle++) {
+    parts.push(colorize(new THREE.CapsuleGeometry(0.12, 0.7, 3, 8).rotateZ(Math.PI / 2).translate(-0.3 + bundle * 0.6, 0.22, 0.32), (color, x) => color.copy(kelp).multiplyScalar(0.85 + 0.2 * Math.sin(x * 12))));
+  }
+  return mergeGeometries(parts.map((geometry) => {
+    geometry.deleteAttribute('uv');
+    return geometry;
+  }));
+}
+
 function buildBedGeometry() {
   const kelp = linearColor(0.36, 0.42, 0.18);
   const kelpLight = linearColor(0.55, 0.6, 0.3);
@@ -343,6 +386,8 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   }
   const nestGeometry = buildNestGeometry();
   const bedGeometry = buildBedGeometry();
+  const heartGeometry = buildHeartGeometry();
+  const pantryGeometry = buildPantryGeometry();
   const chunkMaterial = new THREE.MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.95, transparent: true });
   const chunkGeometry = new THREE.IcosahedronGeometry(0.3, 1);
   const chunks = new THREE.InstancedMesh(chunkGeometry, chunkMaterial, DIG_CHUNK_STEPS * CHUNKS_PER_STEP * 2);
@@ -542,7 +587,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
       addExitMeshes(station);
       return;
     }
-    const geometry = { helperNest: nestGeometry, crabBed: bedGeometry }[station.kind] || storageGeometry;
+    const geometry = { helperNest: nestGeometry, crabBed: bedGeometry, burrowHeart: heartGeometry, pantry: pantryGeometry }[station.kind] || storageGeometry;
     const mesh = new THREE.Mesh(geometry, storageMaterial);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -921,7 +966,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
 
   function addStation(kind, column, row, workshopModel, extra = {}) {
     const station = { kind, column, row, id: nextStationId++, ...extra };
-    if (kind === 'helperNest') station.box = { inventory: {}, shells: [], claws: [] };
+    if (kind === 'helperNest' || kind === 'pantry') station.box = { inventory: {}, shells: [], claws: [] };
     if (kind === 'exit') station.surface = surfacePointOf(column, row);
     state.stations.push(station);
     addStationMesh(station, workshopModel);

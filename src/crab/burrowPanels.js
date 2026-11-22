@@ -44,7 +44,7 @@ function costText(cost, inventory) {
   });
 }
 
-export function createBuildPanel(root, { inventory, hasStation, onChoose, onFill, onClose }) {
+export function createBuildPanel(root, { inventory, hasStation, buildProblem = () => null, onChoose, onFill, onClose }) {
   const shell = createPanelShell(root, 'build-panel', 'Build', onClose);
 
   function render() {
@@ -64,9 +64,11 @@ export function createBuildPanel(root, { inventory, hasStation, onChoose, onFill
       element('div', 'item-ability', text, definition.description);
       const cost = element('div', 'cost', text);
       for (const [index, part] of costText(definition.cost, inventory()).entries()) element('span', part.includes('have') ? 'cost-item short' : 'cost-item', cost, part).dataset.index = String(index);
+      const problem = built ? null : buildProblem(kind);
+      if (problem) element('div', 'panel-hint', text, problem);
       const button = element('button', 'item-action', row, built ? 'Built' : definition.surface ? 'Build' : 'Place');
       button.dataset.station = kind;
-      button.disabled = built || !canAfford(definition.cost, inventory());
+      button.disabled = built || Boolean(problem) || !canAfford(definition.cost, inventory());
       button.addEventListener('click', () => onChoose(kind));
     }
   }
@@ -265,7 +267,7 @@ function addSelect(parent, label, options, value, onChange) {
 
 const ITEM_USE_LABELS = { both: 'Itself and you', self: 'Itself', you: 'You', nobody: 'Nobody' };
 
-export function createHelpersPanel(root, { helpers, limit, jobOptions, boxOptions, gearOptions, helperInfo, onJob, onEquip, giveOptions = () => [], onGiveItem = () => {}, onTakeItem = () => {}, onItemUse = () => {}, onClose }) {
+export function createHelpersPanel(root, { helpers, limit, jobOptions, boxOptions, gearOptions, helperInfo, foodSummary = () => null, onJob, onEquip, giveOptions = () => [], onGiveItem = () => {}, onTakeItem = () => {}, onItemUse = () => {}, onClose }) {
   const shell = createPanelShell(root, 'helpers-panel', 'Helpers', onClose);
   const statusLines = new Map();
 
@@ -326,6 +328,8 @@ export function createHelpersPanel(root, { helpers, limit, jobOptions, boxOption
     shell.body.replaceChildren();
     statusLines.clear();
     element('div', 'summary', shell.body, `${helpers.list.length}/${limit} helpers. Stranded helper crabs wait out in the world — find them, then give them a job here.`);
+    const food = foodSummary();
+    if (food) element('div', 'summary food-summary', shell.body, food);
     if (!helpers.list.length) element('div', 'placeholder', shell.body, 'No helpers yet. Build a helper nest, then look for stranded crabs on the beach.');
     for (const [index, helper] of helpers.list.entries()) {
       const row = element('div', 'item helper-row', shell.body);
@@ -334,6 +338,7 @@ export function createHelpersPanel(root, { helpers, limit, jobOptions, boxOption
       const info = helperInfo(helper);
       element('div', 'item-name', text, `Helper ${index + 1} · Lv ${info.level} · ${Math.max(0, Math.ceil(helper.health))}/${info.maxHealth} HP`);
       element('div', 'item-stats', text, `Attack ${info.attack} · Defense ${info.defense} · XP ${info.experience}/${info.toNext}`);
+      if (info.food) element('div', info.hungry ? 'item-ability danger helper-food' : 'item-stats helper-food', text, info.food);
       statusLines.set(helper, element('div', helper.state === 'fleeing' ? 'item-ability danger' : 'item-stats', text, helperStatus(helper)));
       const jobRow = element('div', 'job-row', text);
       const select = addSelect(jobRow, 'Job', jobOptions(helper), helper.job || '', (value) => changeJob(helper, value, null));
@@ -395,12 +400,14 @@ export function createRackPanel(root, { rack, inventory, batch, drySeconds, onLo
       const bar = element('div', 'rack-bar', slot);
       element('div', 'rack-fill', bar).style.width = `${Math.round(progress * 100)}%`;
     });
-    const have = inventory().seaLettuce || 0;
+    const lettuce = inventory().seaLettuce || 0;
+    const kelp = inventory().kelp || 0;
+    const have = Math.max(lettuce, kelp);
     const loadRow = element('div', 'item', shell.body);
     const loadText = element('div', 'item-text', loadRow);
-    element('div', 'item-name', loadText, `Hang ${batch} sea lettuce to dry`);
-    element('div', have >= batch ? 'item-stats' : 'item-stats short-text', loadText, `You have ${have} sea lettuce`);
-    if (have < batch) element('div', 'panel-hint', loadText, 'Sea lettuce grows at the waterline and in tide pools.');
+    element('div', 'item-name', loadText, `Hang ${batch} sea lettuce or kelp to dry`);
+    element('div', have >= batch ? 'item-stats' : 'item-stats short-text', loadText, `You have ${lettuce} sea lettuce, ${kelp} kelp`);
+    if (have < batch) element('div', 'panel-hint', loadText, 'Sea lettuce grows at the waterline and in tide pools; kelp in shallow water.');
     const loadButton = element('button', 'item-action', loadRow, 'Hang');
     loadButton.dataset.rackLoad = '1';
     loadButton.disabled = have < batch || rack.freeSlots() === 0;

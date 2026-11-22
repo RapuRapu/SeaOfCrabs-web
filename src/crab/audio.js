@@ -268,6 +268,7 @@ export function createAudio({ context = null } = {}) {
       return end;
     },
   };
+  Object.assign(SOUNDS, { gatherKelp: SOUNDS.gatherSeaLettuce, gatherPebbles: SOUNDS.gatherShellBits, gatherSand: SOUNDS.gatherShellBits, gatherClay: SOUNDS.gatherDriftwood });
 
   const PRIORITY_SOUNDS = new Set(['levelUp', 'death', 'recoverRemains', 'craft', 'alert', 'enchantSuccess', 'enchantBreak']);
 

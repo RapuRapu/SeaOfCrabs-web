@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { createHermit } from './hermit.js';
 import { RESOURCE_TYPES, stackLimitOf } from './resources.js';
 import { BURROW_LAYER, BURROW_ORIGIN } from './burrow.js';
-import { RACK_BATCH, RACK_REACH } from './rack.js';
+import { RACK_BATCH, RACK_REACH, RACK_INPUTS, rackInputIn } from './rack.js';
 import { SHELLS, CLAWS, NAKED, BINDINGS, REINFORCEMENTS, shellDefenseOf, clawAttackOf } from './gear.js';
 import { MAX_LEVEL, experienceForLevel } from './progression.js';
 import { CONSUMABLES } from './consumables.js';
@@ -15,6 +15,9 @@ const NEST_REACH = 1.6;
 const STRANDED_BOB_SPEED = 9;
 const HELPER_HEALTH = 10;
 const WALK_SPEED = 4.2;
+export const HELPER_MEAL_SECONDS = 20 * 60;
+export const HUNGRY_WORK_FACTOR = 0.5;
+const MEAL_RETRY_SECONDS = 15;
 const FLEE_SPEED = 6;
 const GATHER_SLOWDOWN = 1.6;
 const GATHER_REACH = 1.4;
@@ -48,7 +51,7 @@ const STRANDED_STRUGGLE_SPEED = 1.5;
 const MAX_RENDER_STEP = 0.1;
 const FLAT_GROUND = new THREE.Vector3(0, 1, 0);
 const CULL_RADIUS = 2.5;
-const CARRY_COLORS = { shellBits: new THREE.Color(1.7, 1.55, 1.3), driftwood: new THREE.Color(0.9, 0.5, 0.18), seaLettuce: new THREE.Color(0.35, 1.5, 0.3), driedKelp: new THREE.Color(1.1, 0.62, 0.18), coral: new THREE.Color(1.8, 0.5, 0.45), seaGlass: new THREE.Color(0.4, 1.2, 1.8), pearls: new THREE.Color(1.9, 1.85, 1.7), scrap: new THREE.Color(0.7, 0.7, 0.75), cloth: new THREE.Color(1.4, 1.2, 0.9), fishBone: new THREE.Color(1.6, 1.6, 1.45), wax: new THREE.Color(1.8, 1.6, 1.1) };
+const CARRY_COLORS = { shellBits: new THREE.Color(1.7, 1.55, 1.3), driftwood: new THREE.Color(0.9, 0.5, 0.18), seaLettuce: new THREE.Color(0.35, 1.5, 0.3), driedKelp: new THREE.Color(1.1, 0.62, 0.18), coral: new THREE.Color(1.8, 0.5, 0.45), seaGlass: new THREE.Color(0.4, 1.2, 1.8), pearls: new THREE.Color(1.9, 1.85, 1.7), scrap: new THREE.Color(0.7, 0.7, 0.75), cloth: new THREE.Color(1.4, 1.2, 0.9), fishBone: new THREE.Color(1.6, 1.6, 1.45), wax: new THREE.Color(1.8, 1.6, 1.1), kelp: new THREE.Color(0.9, 0.8, 0.2), pebbles: new THREE.Color(0.9, 0.9, 0.9), clay: new THREE.Color(1.1, 0.6, 0.4), sand: new THREE.Color(1.8, 1.5, 1.0) };
 const DEFAULT_CARRY_COLOR = new THREE.Color(1.2, 1.2, 1.2);
 
 export function helperMaxHealth(helper) {
@@ -66,7 +69,7 @@ export function helperStats(helper) {
     attack: HELPER_BASE_ATTACK + ((helper.level || 1) - 1) + (claws ? clawAttackOf(claws, clawsItem) : 0),
     defense: shell ? shellDefenseOf(shell, shellItem) : 0,
     attackInterval: HELPER_ATTACK_INTERVAL * ((claws && claws.ability && claws.ability.attackIntervalFactor) || 1) * ((binding && binding.attackIntervalFactor) || 1),
-    speedFactor: (shell ? shell.speedFactor : 1) * ((reinforcement && reinforcement.speedFactor) || 1),
+    speedFactor: (shell ? shell.speedFactor : 1) * ((reinforcement && reinforcement.speedFactor) || 1) * (helper.hungry ? HUNGRY_WORK_FACTOR : 1),
   };
 }
 
@@ -79,7 +82,7 @@ export function expectsToWin(helper, enemy) {
   return (enemy.health / helperPerSecond) * WIN_MARGIN < helper.health / enemyPerSecond;
 }
 
-export function createHelpers(scene, { world, navigation, resources, enemies, quality, saved, rack, burrow, boxOf, strandedSpots, getPlayer, isUnderground, onDeposit, onLost, onSound, onLog = () => {}, playerVitals = () => null, healPlayer = () => {}, onHealFloat = () => {} }) {
+export function createHelpers(scene, { world, navigation, resources, enemies, quality, saved, rack, burrow, boxOf, strandedSpots, getPlayer, isUnderground, onDeposit, onLost, onSound, onLog = () => {}, playerVitals = () => null, healPlayer = () => {}, onHealFloat = () => {}, upkeepActive = () => false, feedHelper = () => false }) {
   const savedState = Array.isArray(saved) ? { list: saved, rescued: [] } : saved || { list: [], rescued: [] };
   const list = savedState.list.map((entry) => {
     const helper = { job: null, nestId: null, carryOrder: null, gear: { shell: null, claws: null }, level: 1, experience: 0, bag: emptyBag(), itemUse: 'both', ...entry, helperId: entry.id, state: 'resting', inside: true, path: [], pathIndex: 0, restTimer: 1 + Math.random() * 2, carrying: entry.carrying || null, load: entry.load || 0, targetId: null };
@@ -165,7 +168,8 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   function leaveForRack(helper) {
     const nest = nestOf(helper);
     if (!rack.exists || !nest || !nest.box) return false;
-    const canLoad = rack.freeSlots() > 0 && (nest.box.inventory.seaLettuce || 0) >= RACK_BATCH;
+    const input = rackInputIn(nest.box.inventory);
+    const canLoad = rack.freeSlots() > 0 && Boolean(input);
     if (!canLoad && rack.state.ready === 0) return false;
     if (!stepOutside(helper)) return false;
     if (!walkTo(helper, rack.state.x, rack.state.z)) {
@@ -173,8 +177,8 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       return false;
     }
     if (canLoad) {
-      nest.box.inventory.seaLettuce -= RACK_BATCH;
-      helper.carrying = 'seaLettuce';
+      nest.box.inventory[input] -= RACK_BATCH;
+      helper.carrying = input;
       helper.load = RACK_BATCH;
     }
     helper.state = 'toRack';
@@ -488,8 +492,23 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     headHome(helper, false);
   }
 
+  function updateMeals(helper, deltaTime) {
+    if (!upkeepActive()) {
+      helper.hungry = false;
+      helper.mealIn = HELPER_MEAL_SECONDS;
+      return;
+    }
+    helper.mealIn = (helper.mealIn ?? HELPER_MEAL_SECONDS) - deltaTime;
+    if (helper.mealIn > 0 || !(helper.state === 'resting' || helper.inside)) return;
+    const wasHungry = helper.hungry;
+    helper.hungry = !feedHelper(helper);
+    helper.mealIn = helper.hungry ? MEAL_RETRY_SECONDS : HELPER_MEAL_SECONDS;
+    if (helper.hungry && !wasHungry) onLog('helper', `${nameOf(helper)} is hungry — put dried kelp in the pantry or its nest box`);
+  }
+
   function updateHelper(helper, deltaTime, time) {
     helper.moving = false;
+    updateMeals(helper, deltaTime);
     const regenFactor = time < (helper.wellFedUntil || 0) ? WELL_FED_REGEN_FACTOR : 1;
     if (helper.state === 'resting' || helper.inside) helper.health = Math.min(helperMaxHealth(helper), helper.health + HELPER_REGEN_PER_SECOND * regenFactor * deltaTime);
     useItemsIfNeeded(helper, time);
@@ -550,7 +569,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     if (helper.state === 'toRack') {
       step(helper, deltaTime, WALK_SPEED);
       if (!rack.exists || Math.hypot(rack.state.x - helper.x, rack.state.z - helper.z) <= RACK_REACH || helper.pathIndex >= helper.path.length) {
-        if (rack.exists && helper.carrying === 'seaLettuce' && rack.load()) {
+        if (rack.exists && RACK_INPUTS.includes(helper.carrying) && rack.load()) {
           helper.carrying = null;
           helper.load = 0;
           onSound('gatherSeaLettuce', helper);
@@ -580,7 +599,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
         headHome(helper, false);
         return;
       }
-      helper.progress += deltaTime;
+      helper.progress += deltaTime * (helper.hungry ? HUNGRY_WORK_FACTOR : 1);
       if (helper.progress >= RESOURCE_TYPES[node.type].gatherSeconds * GATHER_SLOWDOWN) {
         resources.gather(node);
         helper.carrying = node.type;
@@ -825,7 +844,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     return true;
   }
 
-  const serialize = () => ({ list: list.map(({ id, spotId, nestId, job, carryOrder, carrying, load, gear, level, experience, bag, itemUse }) => ({ id, spotId, nestId, job, carryOrder, carrying, load, gear, level, experience, bag, itemUse })), rescued: [...rescued] });
+  const serialize = () => ({ list: list.map(({ id, spotId, nestId, job, carryOrder, carrying, load, gear, level, experience, bag, itemUse, mealIn, hungry }) => ({ id, spotId, nestId, job, carryOrder, carrying, load, gear, level, experience, bag, itemUse, mealIn, hungry })), rescued: [...rescued] });
 
   for (const helper of list) placeAtNest(helper);
 

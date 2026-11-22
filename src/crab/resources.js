@@ -13,6 +13,10 @@ export const RESOURCE_TYPES = {
   shellBits: { label: 'Shell bits', icon: '🐚', count: 16, gatherSeconds: 1.0, standOff: 1.3 },
   driftwood: { label: 'Driftwood', icon: '🪵', count: 12, gatherSeconds: 1.3, standOff: 1.5 },
   seaLettuce: { label: 'Sea lettuce', icon: '🥬', count: 12, gatherSeconds: 0.9, standOff: 2.1 },
+  kelp: { label: 'Kelp', icon: '🌿', count: 10, gatherSeconds: 1.1, standOff: 1.8 },
+  pebbles: { label: 'Pebbles', icon: '🪨', count: 10, gatherSeconds: 1.0, standOff: 1.3 },
+  clay: { label: 'Clay', icon: '🟤', count: 8, gatherSeconds: 1.4, standOff: 1.4 },
+  sand: { label: 'Sand', icon: '🏖️', count: 8, gatherSeconds: 0.9, standOff: 1.4 },
   pearls: { label: 'Pearls', icon: '🦪', count: 3, gatherSeconds: 1.6, standOff: 1.3 },
   coral: { label: 'Coral', icon: '🪸', count: 12, gatherSeconds: 1.4, standOff: 1.5 },
   seaGlass: { label: 'Sea glass', icon: '🔷', count: 8, gatherSeconds: 1.1, standOff: 1.3 },
@@ -101,6 +105,65 @@ function buildSeaLettuceGeometry() {
     return paint(sheet.rotateY(leaf.turn).translate(leaf.shiftX, 0, leaf.shiftZ), (color, x, y) => color.copy(deep).lerp(bright, THREE.MathUtils.smoothstep(y, 0.04, 0.42)));
   });
   return mergeGeometries(leaves);
+}
+
+function buildKelpGeometry() {
+  const stem = linearColor(0.3, 0.26, 0.08);
+  const blade = linearColor(0.56, 0.48, 0.14);
+  const fronds = [];
+  for (let frond = 0; frond < 5; frond++) {
+    const angle = (frond / 5) * Math.PI * 2 + 0.3;
+    const height = 1.3 + 0.35 * Math.sin(frond * 2.7);
+    const sheet = new THREE.PlaneGeometry(0.22, height, 1, 8).translate(0, height / 2, 0);
+    const positions = sheet.attributes.position;
+    for (let index = 0; index < positions.count; index++) {
+      const y = positions.getY(index);
+      positions.setX(index, positions.getX(index) * (1.2 - y / height * 0.6) + Math.sin(y * 3 + frond) * 0.12 * y);
+      positions.setZ(index, Math.sin(y * 2.2 + frond * 1.3) * 0.1 * y);
+    }
+    sheet.computeVertexNormals();
+    fronds.push(paint(sheet.rotateY(angle).translate(Math.cos(angle) * 0.12, 0, Math.sin(angle) * 0.12), (color, x, y) => color.copy(stem).lerp(blade, THREE.MathUtils.smoothstep(y, 0.1, 0.9))));
+  }
+  return mergeGeometries(fronds);
+}
+
+function buildPebblesGeometry() {
+  const tints = [linearColor(0.62, 0.62, 0.6), linearColor(0.44, 0.45, 0.47), linearColor(0.72, 0.66, 0.58)];
+  const stones = [
+    { scale: [0.36, 0.2, 0.28], at: [0, 0.12, 0], turn: 0.2 },
+    { scale: [0.26, 0.16, 0.22], at: [0.46, 0.09, 0.14], turn: 1.4 },
+    { scale: [0.22, 0.14, 0.18], at: [-0.38, 0.08, 0.26], turn: 2.6 },
+    { scale: [0.2, 0.12, 0.17], at: [0.1, 0.07, -0.42], turn: 0.9 },
+  ];
+  return mergeGeometries(stones.map(({ scale, at, turn }, index) => paint(new THREE.IcosahedronGeometry(1, 2).scale(...scale).rotateY(turn).translate(...at), (color, x, y) => color.copy(tints[index % 3]).multiplyScalar(0.85 + 0.4 * THREE.MathUtils.smoothstep(y, 0.02, 0.25)))));
+}
+
+function buildClayGeometry() {
+  const wet = linearColor(0.42, 0.3, 0.24);
+  const dry = linearColor(0.66, 0.5, 0.4);
+  const lump = new THREE.SphereGeometry(0.55, 16, 10).scale(1.2, 0.45, 0.9);
+  const positions = lump.attributes.position;
+  for (let index = 0; index < positions.count; index++) {
+    const x = positions.getX(index);
+    const z = positions.getZ(index);
+    positions.setY(index, Math.max(0, positions.getY(index) + 0.04 * Math.sin(x * 9) * Math.cos(z * 7)) + 0.02);
+  }
+  lump.computeVertexNormals();
+  return paint(lump, (color, x, y) => color.copy(wet).lerp(dry, THREE.MathUtils.smoothstep(y, 0.05, 0.3)));
+}
+
+function buildSandGeometry() {
+  const pale = linearColor(0.92, 0.82, 0.62);
+  const shade = linearColor(0.74, 0.62, 0.44);
+  const mound = new THREE.ConeGeometry(0.7, 0.5, 18, 3).translate(0, 0.25, 0);
+  const positions = mound.attributes.position;
+  for (let index = 0; index < positions.count; index++) {
+    const x = positions.getX(index);
+    const z = positions.getZ(index);
+    positions.setY(index, positions.getY(index) * (0.85 + 0.15 * Math.sin(Math.atan2(z, x) * 5)));
+  }
+  mound.computeVertexNormals();
+  return paint(mound, (color, x, y, z) => color.copy(shade).lerp(pale, 0.5 + 0.5 * Math.sin(x * 4 + z * 3 + y * 6)));
 }
 
 function buildPearlGeometry() {
@@ -228,12 +291,16 @@ void main() {
 
 export function createResources(scene, overlay, world, quality, savedNodes, starterSpots) {
   const random = createRandom(2024);
-  const geometries = { shellBits: buildShellBitGeometry(), driftwood: buildDriftwoodGeometry(), seaLettuce: buildSeaLettuceGeometry(), pearls: buildPearlGeometry(), coral: buildCoralGeometry(), seaGlass: buildSeaGlassGeometry(), scrap: buildScrapGeometry(), cloth: buildClothGeometry(), fishBone: buildFishBoneGeometry(), wax: buildWaxGeometry() };
+  const geometries = { shellBits: buildShellBitGeometry(), driftwood: buildDriftwoodGeometry(), seaLettuce: buildSeaLettuceGeometry(), kelp: buildKelpGeometry(), pebbles: buildPebblesGeometry(), clay: buildClayGeometry(), sand: buildSandGeometry(), pearls: buildPearlGeometry(), coral: buildCoralGeometry(), seaGlass: buildSeaGlassGeometry(), scrap: buildScrapGeometry(), cloth: buildClothGeometry(), fishBone: buildFishBoneGeometry(), wax: buildWaxGeometry() };
   const highTideMark = TIDE_MIDDLE + TIDE_AMPLITUDE;
   const accepts = {
     shellBits: (x, z, height) => !isOnReef(x, z) && !isInCamp(x, z) && height > TIDE_MIDDLE - 1.4 && height < highTideMark + 1.6 && world.retained.levelAt(x, z) - height < 0.2,
     driftwood: (x, z, height) => !isInCamp(x, z) && height > highTideMark + 0.4 && height < highTideMark + 3.6,
     seaLettuce: (x, z, height) => !isOnReef(x, z) && (world.retained.levelAt(x, z) - height > 0.2 || (height > TIDE_MIDDLE - 1.6 && height < TIDE_MIDDLE + 0.6)),
+    kelp: (x, z, height) => !isOnReef(x, z) && !isInCamp(x, z) && height > TIDE_MIDDLE - 2.6 && height < TIDE_MIDDLE - 0.7,
+    pebbles: (x, z, height) => !isOnReef(x, z) && !isInCamp(x, z) && height > highTideMark - 0.4 && height < highTideMark + 2.8,
+    clay: (x, z, height) => !isOnReef(x, z) && !isInCamp(x, z) && height > TIDE_MIDDLE - 0.3 && height < TIDE_MIDDLE + 1.1 && world.retained.levelAt(x, z) - height < 0.2,
+    sand: (x, z, height) => !isInCamp(x, z) && height > highTideMark + 1.2 && height < highTideMark + 5.5,
     pearls: (x, z, height) => !isOnReef(x, z) && world.retained.levelAt(x, z) - height > PEARL_MINIMUM_POOL_DEPTH,
     coral: (x, z, height) => isOnReef(x, z) && height < -1.6 && height > -3.6,
     seaGlass: (x, z, height) => isOnReef(x, z) && height > -3.0,
