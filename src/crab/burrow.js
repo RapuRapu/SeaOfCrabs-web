@@ -1,3 +1,4 @@
+import { applyBurrowSurface } from './burrowSurface.js';
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -409,11 +410,11 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
 
   const interior = new THREE.Group();
   interior.position.set(BURROW_ORIGIN.x, BURROW_ORIGIN.y, BURROW_ORIGIN.z);
-  const floorMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96 });
+  const floorMaterial = applyBurrowSurface(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96 }), 'floor', BURROW_ORIGIN.y);
   const floor = new THREE.Mesh(buildFloorGeometry(), floorMaterial);
   floor.receiveShadow = true;
   interior.add(floor);
-  const sandMaterial = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94 });
+  const sandMaterial = applyBurrowSurface(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94 }), 'sand', BURROW_ORIGIN.y);
   const sandChunks = [];
   for (let firstRow = BURROW_CELL_MIN - BORDER_RING; firstRow <= BURROW_CELL_MAX + BORDER_RING; firstRow += SAND_CHUNK_CELLS) {
     for (let firstColumn = BURROW_CELL_MIN - BORDER_RING; firstColumn <= BURROW_CELL_MAX + BORDER_RING; firstColumn += SAND_CHUNK_CELLS) {
