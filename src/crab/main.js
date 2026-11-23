@@ -1648,7 +1648,7 @@ function handleFillTap(clientX, clientY) {
   }
   placement.fillSelection = null;
   refreshFillCells();
-  const ground = groundPointUnder(clientX, clientY);
+  const ground = underground ? point : groundPointUnder(clientX, clientY);
   if (ground) setDestination(ground.x, ground.z);
 }
 

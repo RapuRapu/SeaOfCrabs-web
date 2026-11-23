@@ -32,6 +32,8 @@ FLOW = r'''
   out.firstTapSelects = !d.player.digTarget && d.placement.fillSelection && d.placement.fillSelection.column === 2 && d.placement.fillSelection.row === 1;
   tap(3, 2);
   out.middleTapWalks = !d.player.digTarget && !d.placement.fillSelection && d.player.path.length > 0 && d.placement.filling;
+  const walkEnd = d.player.path[d.player.path.length - 1];
+  out.middleTapWalksToTappedCell = Boolean(walkEnd) && d.burrow.cellOf(walkEnd.x, walkEnd.z).column === 3 && d.burrow.cellOf(walkEnd.x, walkEnd.z).row === 2;
   step(4, () => d.player.path.length === 0);
   tap(2, 1);
   tap(2, 1);
