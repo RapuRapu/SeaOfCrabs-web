@@ -1173,6 +1173,7 @@ function cancelPlacement() {
   placement.rack = false;
   burrow.showPlacementCells(false);
   placement.exitSpots = null;
+  placement.exitRejected = null;
   placement.filling = false;
   hud.setMode(null);
   refreshHud(null);
@@ -1315,9 +1316,8 @@ function chooseStation(kind) {
   }
   placement.station = kind;
   if (kind === 'exit') {
-    placement.exitSpots = burrow.exitWallSpots().filter((spot) => !exitCellProblem(spot.column, spot.row));
-    burrow.showExitSpots(placement.exitSpots);
-    hud.setMode(placement.exitSpots.length ? 'Tap a glowing spot by a tunnel wall' : 'No spot yet — dig toward explored dry sand, with solid sand around the end', cancelPlacement);
+    showExitPlacementSpots();
+    hud.setMode(placement.exitSpots.length ? 'Tap a glowing spot by a tunnel wall' : 'No green spot yet — tap a red one to see why, or dig toward explored dry sand', cancelPlacement);
     return;
   }
   burrow.showPlacementCells(true);
@@ -1328,6 +1328,23 @@ const BOSS_EXIT_CLEARANCE = 24;
 const EXIT_PICK_PIXELS = 44;
 const exitMarkerProbe = new THREE.Vector3();
 const EXIT_SPACING = 7;
+
+const EXIT_PROBLEM_TEXT = {
+  tight: 'Too little solid sand around this wall — an exit needs untouched sand on both sides and behind',
+  outside: 'Too close to the edge of the world',
+  unexplored: 'The sand above is unexplored — walk there first',
+  boss: 'Too close to a boss lair',
+  crowded: 'Too close to another entrance or exit',
+  wet: 'The sand above is too wet — it floods at high tide',
+  blocked: 'Rocks or structures above — no room for an opening',
+};
+
+function showExitPlacementSpots() {
+  const spots = burrow.exitWallSpots({ includeTight: true }).map((spot) => ({ ...spot, problem: spot.tight ? 'tight' : exitCellProblem(spot.column, spot.row) }));
+  placement.exitSpots = spots.filter((spot) => !spot.problem);
+  placement.exitRejected = spots.filter((spot) => spot.problem);
+  burrow.showExitSpots(placement.exitSpots, placement.exitRejected);
+}
 
 function exitCellProblem(column, row) {
   const surface = burrow.surfacePointOf(column, row);
@@ -1529,8 +1546,7 @@ function startMovingExit(station) {
   burrow.removeExit(station);
   placement.relocatingExit = structuredClone(kept);
   placement.station = 'exit';
-  placement.exitSpots = burrow.exitWallSpots().filter((spot) => !exitCellProblem(spot.column, spot.row));
-  burrow.showExitSpots(placement.exitSpots);
+  showExitPlacementSpots();
   hud.setMode('Tap a glowing spot to move the exit', cancelPlacement);
   return true;
 }
@@ -2839,16 +2855,17 @@ function handleBurrowTap(clientX, clientY, isNewTouch) {
   if (placement.station === 'exit') {
     if (!isNewTouch) return;
     const floor = burrow.pointOnFloor(clientX, clientY, camera, raycaster);
-    const spot = placement.exitSpots.reduce((best, candidate) => {
+    const spot = [...placement.exitSpots, ...(placement.exitRejected || [])].reduce((best, candidate) => {
       exitMarkerProbe.set(candidate.marker.x, BURROW_ORIGIN.y + 0.18, candidate.marker.z).project(camera);
       const distance = Math.hypot((exitMarkerProbe.x * 0.5 + 0.5) * innerWidth - clientX, (-exitMarkerProbe.y * 0.5 + 0.5) * innerHeight - clientY);
       return distance < EXIT_PICK_PIXELS && (!best || distance < best.distance) ? { candidate, distance } : best;
     }, null);
-    if (spot && buildStation('exit', spot.candidate.column, spot.candidate.row, { free: Boolean(placement.relocatingExit) })) {
+    if (spot && spot.candidate.problem) hud.log('notice', EXIT_PROBLEM_TEXT[spot.candidate.problem] || 'An exit cannot open here');
+    else if (spot && buildStation('exit', spot.candidate.column, spot.candidate.row, { free: Boolean(placement.relocatingExit) })) {
       placement.relocatingExit = null;
       cancelPlacement();
     }
-    else if (floor) hud.log('notice', 'Pick one of the glowing spots');
+    else if (!spot && floor) hud.log('notice', 'Pick one of the glowing green spots — red ones explain why they cannot be used');
     return;
   }
   if (placement.station) {

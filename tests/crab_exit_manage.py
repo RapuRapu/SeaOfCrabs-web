@@ -50,6 +50,14 @@ FLOW = r'''
   out.actionsUnderground = d.travelActions();
   const original = { column: exitPoint().station.column, row: exitPoint().station.row };
   d.startMovingExit(exitPoint().station);
+  const rejected = (d.placement.exitRejected || [])[0];
+  if (rejected) {
+    d.updateCamera(0, true);
+    const mark = new d.camera.position.constructor(rejected.marker.x, 200.17, rejected.marker.z).project(d.camera);
+    d.handleTap((mark.x + 1) / 2 * innerWidth, (1 - mark.y) / 2 * innerHeight, true);
+  }
+  const lastLine = [...document.querySelectorAll('#hud .game-log .log-line')].map((line) => line.textContent).slice(-1)[0] || '';
+  out.rejectedSpotExplained = Boolean(rejected) && /Too|unexplored|wet|Rocks/.test(lastLine) && d.placement.station === 'exit';
   out.placingWithSpots = d.placement.exitSpots.length > 0 && d.burrow.travelPoints().length === 0;
   d.cancelPlacement();
   const restored = exitPoint();

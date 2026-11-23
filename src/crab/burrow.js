@@ -459,6 +459,12 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   highlights.frustumCulled = false;
   highlights.renderOrder = 6;
   interior.add(highlights);
+  const rejectedMaterial = new THREE.MeshBasicMaterial({ color: new THREE.Color(1.6, 0.35, 0.3), transparent: true, opacity: 0.45, depthWrite: false, depthTest: false });
+  const rejectedHighlights = new THREE.InstancedMesh(new RoundedBoxGeometry(2.2, 0.04, 2.2, 2, 0.4), rejectedMaterial, BURROW_SPAN * BURROW_SPAN);
+  rejectedHighlights.count = 0;
+  rejectedHighlights.frustumCulled = false;
+  rejectedHighlights.renderOrder = 6;
+  interior.add(rejectedHighlights);
   scene.add(interior);
   const exitLabel = element('div', 'world-label burrow-label exit-label hidden', labelParent, 'Exit');
   const stationMeshes = new Map();
@@ -819,6 +825,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
 
   function showFillCells(cells, selected) {
     highlights.count = 0;
+    rejectedHighlights.count = 0;
     highlights.renderOrder = 0;
     highlightMaterial.depthTest = true;
     for (const { column, row } of cells) {
@@ -935,7 +942,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     return EXIT_KEEP_CELLS.map(([sideways, away]) => [column + sideways * across.column - away * towardAccess.column, row + sideways * across.row - away * towardAccess.row]);
   }
 
-  function exitWallSpots() {
+  function exitWallSpots({ includeTight = false } = {}) {
     const spots = [];
     const seen = new Set();
     for (const index of dugCells) {
@@ -948,28 +955,32 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
         const key = `${column},${row}`;
         if (seen.has(key) || !insideGrid(column, row) || isDug(column, row) || exitKeep.has(cellIndex(column, row))) continue;
         const keep = keepCellsFor(column, row, accessColumn, accessRow);
-        if (!keep.every(([keepColumn, keepRow]) => insideGrid(keepColumn, keepRow) && !isDug(keepColumn, keepRow))) continue;
+        const tight = !keep.every(([keepColumn, keepRow]) => insideGrid(keepColumn, keepRow) && !isDug(keepColumn, keepRow));
+        if (tight && !includeTight) continue;
         seen.add(key);
         const wall = cellCenter(column, row);
         const access = cellCenter(accessColumn, accessRow);
-        spots.push({ column, row, accessColumn, accessRow, keep, marker: { x: access.x + (wall.x - access.x) * 0.38, z: access.z + (wall.z - access.z) * 0.38 } });
+        spots.push({ column, row, accessColumn, accessRow, keep, tight, marker: { x: access.x + (wall.x - access.x) * 0.38, z: access.z + (wall.z - access.z) * 0.38 } });
       }
     }
     return spots;
   }
 
-  function showExitSpots(spots) {
+  function showExitSpots(spots, rejected = []) {
     highlights.count = 0;
+    rejectedHighlights.count = 0;
     highlights.renderOrder = 6;
     highlightMaterial.depthTest = false;
-    for (const spot of spots) {
-      transform.position.set(spot.marker.x - BURROW_ORIGIN.x, 0.18, spot.marker.z - BURROW_ORIGIN.z);
-      transform.rotation.set(0, 0, 0);
-      transform.scale.set(0.6, 1, 0.6);
-      transform.updateMatrix();
-      highlights.setMatrixAt(highlights.count++, transform.matrix);
+    for (const [mesh, list, size] of [[highlights, spots, 0.6], [rejectedHighlights, rejected, 0.42]]) {
+      for (const spot of list) {
+        transform.position.set(spot.marker.x - BURROW_ORIGIN.x, 0.17, spot.marker.z - BURROW_ORIGIN.z);
+        transform.rotation.set(0, 0, 0);
+        transform.scale.set(size, 1, size);
+        transform.updateMatrix();
+        mesh.setMatrixAt(mesh.count++, transform.matrix);
+      }
+      mesh.instanceMatrix.needsUpdate = true;
     }
-    highlights.instanceMatrix.needsUpdate = true;
   }
 
   function addExit(spot, workshopModel) {
@@ -980,6 +991,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
 
   function showPlacementCells(visible, allowed = () => true) {
     highlights.count = 0;
+    rejectedHighlights.count = 0;
     highlights.renderOrder = 0;
     highlightMaterial.depthTest = true;
     if (!visible) return;
