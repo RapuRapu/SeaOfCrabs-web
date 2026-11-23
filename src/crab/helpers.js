@@ -3,6 +3,7 @@ import { createHermit } from './hermit.js';
 import { RESOURCE_TYPES, stackLimitOf } from './resources.js';
 import { BURROW_LAYER, BURROW_ORIGIN } from './burrow.js';
 import { RACK_BATCH, RACK_REACH, RACK_INPUTS, rackInputIn } from './rack.js';
+import { PROCESS_RECIPES, freeSlots as processFreeSlots, loadStation, collectStation, processView } from './processing.js';
 import { SHELLS, CLAWS, NAKED, BINDINGS, REINFORCEMENTS, shellDefenseOf, clawAttackOf } from './gear.js';
 import { MAX_LEVEL, experienceForLevel } from './progression.js';
 import { CONSUMABLES } from './consumables.js';
@@ -11,6 +12,9 @@ export const HELPER_LIMIT = 6;
 export const NEST_CAPACITY = 3;
 export const HELPER_SIZE = 0.7;
 const CARRY_LOAD = 5;
+export const SATCHEL_LOAD = 2;
+export const SATCHEL_CORD_COST = 2;
+const SATCHEL_NEXT_NODE_RANGE = 25;
 const NEST_REACH = 1.6;
 const STRANDED_BOB_SPEED = 9;
 const HELPER_HEALTH = 10;
@@ -82,7 +86,7 @@ export function expectsToWin(helper, enemy) {
   return (enemy.health / helperPerSecond) * WIN_MARGIN < helper.health / enemyPerSecond;
 }
 
-export function createHelpers(scene, { world, navigation, resources, enemies, quality, saved, rack, burrow, boxOf, strandedSpots, getPlayer, isUnderground, onDeposit, onLost, onSound, onLog = () => {}, playerVitals = () => null, healPlayer = () => {}, onHealFloat = () => {}, upkeepActive = () => false, feedHelper = () => false }) {
+export function createHelpers(scene, { world, navigation, resources, enemies, quality, saved, rack, burrow, boxOf, strandedSpots, getPlayer, isUnderground, onDeposit, onLost, onSound, onLog = () => {}, playerVitals = () => null, healPlayer = () => {}, onHealFloat = () => {}, upkeepActive = () => false, feedHelper = () => false, boardTask = () => null }) {
   const savedState = Array.isArray(saved) ? { list: saved, rescued: [] } : saved || { list: [], rescued: [] };
   const list = savedState.list.map((entry) => {
     const helper = { job: null, nestId: null, carryOrder: null, gear: { shell: null, claws: null }, level: 1, experience: 0, bag: emptyBag(), itemUse: 'both', ...entry, helperId: entry.id, state: 'resting', inside: true, path: [], pathIndex: 0, restTimer: 1 + Math.random() * 2, carrying: entry.carrying || null, load: entry.load || 0, targetId: null };
@@ -121,6 +125,8 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
 
   const nodeById = (id) => resources.nodes.find((node) => node.id === id) || null;
   const nestOf = (helper) => burrow.state.stations.find((station) => station.id === helper.nestId) || null;
+  const stationById = (id) => burrow.state.stations.find((station) => station.id === id) || null;
+  const depositStationOf = (helper) => (helper.tripTargetId && stationById(helper.tripTargetId)) || nestOf(helper);
   const nestSpot = (helper) => {
     const nest = nestOf(helper);
     return nest ? burrow.stationSpot(nest) : null;
@@ -185,8 +191,25 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     return true;
   }
 
+  function leaveForProcess(helper, station) {
+    const nest = nestOf(helper);
+    if (!station || !nest || !nest.box) return false;
+    const recipe = PROCESS_RECIPES[station.kind];
+    const canLoad = processFreeSlots(station) > 0 && (nest.box.inventory[recipe.input] || 0) >= recipe.inputAmount;
+    if (!canLoad && processView(station).ready === 0) return false;
+    const spot = burrow.stationSpot(station);
+    if (!walkTo(helper, spot.x, spot.z)) return false;
+    if (canLoad) {
+      nest.box.inventory[recipe.input] -= recipe.inputAmount;
+      Object.assign(helper, { carrying: recipe.input, load: recipe.inputAmount });
+    }
+    helper.processStationId = station.id;
+    helper.state = 'toProcess';
+    return true;
+  }
+
   function startCarry(helper) {
-    const order = helper.carryOrder;
+    const order = helper.activeCarry;
     const source = order && boxOf(order.fromId);
     const target = order && boxOf(order.toId);
     if (!source || !target || order.fromId === order.toId) return false;
@@ -289,18 +312,30 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       startFollowing(helper);
       return;
     }
-    if (helper.job === 'rack') {
+    const task = helper.job === 'board' ? boardTask(helper) : { job: helper.job, carryOrder: helper.carryOrder };
+    helper.tripTargetId = (task && task.deliverToId) || null;
+    helper.activeCarry = (task && task.carryOrder) || null;
+    const job = task && task.job;
+    if (!job) {
+      helper.restTimer = IDLE_RETRY_SECONDS;
+      return;
+    }
+    if (job === 'rack') {
       if (!leaveForRack(helper)) helper.restTimer = IDLE_RETRY_SECONDS;
       return;
     }
-    if (helper.job === 'carry') {
+    if (job.startsWith('tend:')) {
+      if (!leaveForProcess(helper, stationById(Number(job.slice(5))))) helper.restTimer = IDLE_RETRY_SECONDS;
+      return;
+    }
+    if (job === 'carry') {
       if (!startCarry(helper)) helper.restTimer = IDLE_RETRY_SECONDS;
       return;
     }
     const point = homePoint(helper);
     if (!point) return;
     const origin = point.surface;
-    const candidates = resources.nodes.filter((node) => node.type === helper.job && !node.gathered && !node.reservedBy);
+    const candidates = resources.nodes.filter((node) => node.type === job && !node.gathered && !node.reservedBy);
     candidates.sort((first, second) => Math.hypot(first.x - origin.x, first.z - origin.z) - Math.hypot(second.x - origin.x, second.z - origin.z));
     stepOutside(helper);
     for (const node of candidates.slice(0, 4)) {
@@ -313,6 +348,17 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     }
     placeAtNest(helper);
     helper.restTimer = IDLE_RETRY_SECONDS;
+  }
+
+  function goGatherNext(helper, type) {
+    const next = resources.nodes
+      .filter((node) => node.type === type && !node.gathered && !node.reservedBy && Math.hypot(node.x - helper.x, node.z - helper.z) < SATCHEL_NEXT_NODE_RANGE)
+      .sort((first, second) => Math.hypot(first.x - helper.x, first.z - helper.z) - Math.hypot(second.x - helper.x, second.z - helper.z))[0];
+    if (!next || !walkTo(helper, next.x, next.z)) return false;
+    helper.targetId = next.id;
+    next.reservedBy = helper.id;
+    helper.state = 'outbound';
+    return true;
   }
 
   function headHome(helper, fleeing) {
@@ -329,7 +375,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     helper.exitPoint = null;
     placeAtNest(helper);
     if (helper.carrying) {
-      onDeposit(nestOf(helper), helper.carrying, helper.load || 1);
+      onDeposit(depositStationOf(helper), helper.carrying, helper.load || 1);
       helper.carrying = null;
       helper.load = 0;
     }
@@ -379,11 +425,37 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   }
 
   function updateInside(helper, deltaTime) {
+    if (helper.state === 'toProcess') {
+      if (!step(helper, deltaTime, WALK_SPEED)) return;
+      const station = stationById(helper.processStationId);
+      if (!station) {
+        returnToNest(helper);
+        return;
+      }
+      const recipe = PROCESS_RECIPES[station.kind];
+      if (helper.carrying === recipe.input && !loadStation(station, { [recipe.input]: helper.load })) {
+        const nest = nestOf(helper);
+        if (nest && nest.box) nest.box.inventory[recipe.input] = (nest.box.inventory[recipe.input] || 0) + helper.load;
+      }
+      Object.assign(helper, { carrying: null, load: 0 });
+      const collected = collectStation(station);
+      onSound('gatherDriftwood', helper);
+      if (!collected) {
+        returnToNest(helper);
+        return;
+      }
+      Object.assign(helper, { carrying: recipe.output, load: collected });
+      const target = depositStationOf(helper);
+      const spot = target && burrow.stationSpot(target);
+      if (spot && walkTo(helper, spot.x, spot.z)) helper.state = 'toTarget';
+      else returnToNest(helper);
+      return;
+    }
     if (helper.state === 'toSource') {
       if (!step(helper, deltaTime, WALK_SPEED)) return;
-      const source = boxOf(helper.carryOrder && helper.carryOrder.fromId);
-      const target = boxOf(helper.carryOrder && helper.carryOrder.toId);
-      const toStation = target && burrow.state.stations.find((station) => station.id === helper.carryOrder.toId);
+      const source = boxOf(helper.activeCarry && helper.activeCarry.fromId);
+      const target = boxOf(helper.activeCarry && helper.activeCarry.toId);
+      const toStation = target && stationById(helper.activeCarry.toId);
       const available = source ? source.inventory[helper.carryType] || 0 : 0;
       if (!toStation || !available) {
         returnToNest(helper);
@@ -397,7 +469,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       helper.state = 'toTarget';
     } else if (helper.state === 'toTarget') {
       if (!step(helper, deltaTime, WALK_SPEED)) return;
-      const target = boxOf(helper.carryOrder && helper.carryOrder.toId) || boxOf(helper.nestId);
+      const target = boxOf(helper.tripTargetId ?? (helper.activeCarry && helper.activeCarry.toId)) || boxOf(helper.nestId);
       if (target && helper.carrying) target.inventory[helper.carrying] = (target.inventory[helper.carrying] || 0) + helper.load;
       helper.carrying = null;
       helper.load = 0;
@@ -515,7 +587,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     if (helper.state === 'resting') {
       helper.restTimer -= deltaTime;
       if (helper.carrying) {
-        onDeposit(nestOf(helper), helper.carrying, helper.load || 1);
+        onDeposit(depositStationOf(helper), helper.carrying, helper.load || 1);
         helper.carrying = null;
         helper.load = 0;
       }
@@ -602,10 +674,10 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       helper.progress += deltaTime * (helper.hungry ? HUNGRY_WORK_FACTOR : 1);
       if (helper.progress >= RESOURCE_TYPES[node.type].gatherSeconds * GATHER_SLOWDOWN) {
         resources.gather(node);
+        helper.load = (helper.carrying === node.type ? helper.load : 0) + 1;
         helper.carrying = node.type;
-        helper.load = 1;
         onSound(`gather${node.type[0].toUpperCase()}${node.type.slice(1)}`, helper);
-        headHome(helper, false);
+        if (!(helper.satchel && helper.load < SATCHEL_LOAD && goGatherNext(helper, node.type))) headHome(helper, false);
       }
     } else if (helper.state === 'returning' || helper.state === 'fleeing') {
       step(helper, deltaTime, helper.state === 'fleeing' ? FLEE_SPEED : WALK_SPEED);
@@ -844,7 +916,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     return true;
   }
 
-  const serialize = () => ({ list: list.map(({ id, spotId, nestId, job, carryOrder, carrying, load, gear, level, experience, bag, itemUse, mealIn, hungry }) => ({ id, spotId, nestId, job, carryOrder, carrying, load, gear, level, experience, bag, itemUse, mealIn, hungry })), rescued: [...rescued] });
+  const serialize = () => ({ list: list.map(({ id, spotId, nestId, job, carryOrder, carrying, load, gear, level, experience, bag, itemUse, mealIn, hungry, satchel }) => ({ id, spotId, nestId, job, carryOrder, carrying, load, gear, level, experience, bag, itemUse, mealIn, hungry, satchel })), rescued: [...rescued] });
 
   for (const helper of list) placeAtNest(helper);
 

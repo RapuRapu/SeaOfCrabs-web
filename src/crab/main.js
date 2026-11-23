@@ -32,9 +32,10 @@ import { random, randomSource } from './random.js';
 import { createAudio } from './audio.js';
 import { createBurrow, loadBurrowModels, createEmptyBurrow, BURROW_LAYER, BURROW_ORIGIN, ENTRANCE_REACH, ENTRANCE_BLOCK_RADIUS, STATION_KINDS, STATION_REACH, SHAFT_CELL, SHAFT_ACCESS_ROW_STEP, BURROW_CELL, cellCenter } from './burrow.js';
 import { createThumbnails } from './thumbnails.js';
-import { createBuildPanel, createStoragePanel, createHelpersPanel, createRackPanel } from './burrowPanels.js';
+import { createBuildPanel, createStoragePanel, createHelpersPanel, createRackPanel, createProcessPanel, createBoardPanel } from './burrowPanels.js';
+import { PROCESS_RECIPES, isProcessStation, loadStation, collectStation, tickStations, processView } from './processing.js';
 import { createRack, RACK_BATCH, RACK_DRY_SECONDS, RACK_REACH, RACK_BLOCK_RADIUS, rackInputIn } from './rack.js';
-import { createHelpers, HELPER_LIMIT, helperStats, helperMaxHealth, HELPER_MEAL_SECONDS } from './helpers.js';
+import { createHelpers, HELPER_LIMIT, helperStats, helperMaxHealth, HELPER_MEAL_SECONDS, SATCHEL_LOAD, SATCHEL_CORD_COST } from './helpers.js';
 import { itemName } from './itemInfo.js';
 import { createFog } from './fog.js';
 import { createMapView } from './mapView.js';
@@ -527,6 +528,51 @@ const rackPanel = createRackPanel(hud.root, {
   onDismantle: () => dismantleStructure('dryingRack'),
   onClose: () => rackPanel.close(),
 });
+let processRefreshTimer = 0;
+const boardPanel = createBoardPanel(hud.root, {
+  orders: () => boardView(),
+  materialOptions: () => {
+    const known = noteDiscoveries();
+    return Object.entries(RESOURCE_TYPES).filter(([type]) => known.has(type) || ALWAYS_KNOWN_MATERIALS.has(type) || (save.inventory[type] || 0) > 0 || type === 'driedKelp' || type === 'cord' || type === 'shellLime').map(([type, definition]) => ({ value: type, label: `${definition.icon} ${definition.label}` }));
+  },
+  boxOptions: () => burrow.state.stations.filter((station) => boxOf(station.id)).map((station) => ({ value: station.id, label: stationName(station) })),
+  amounts: () => BOARD_AMOUNTS,
+  onAdd: (material, toId, amount) => {
+    if (addBoardOrder(material, toId, amount)) boardPanel.render();
+  },
+  onMove: (id, offset) => {
+    if (moveBoardOrder(id, offset)) boardPanel.render();
+  },
+  onRemove: (id) => {
+    if (removeBoardOrder(id)) boardPanel.render();
+  },
+  onClose: () => boardPanel.close(),
+});
+const processPanel = createProcessPanel(hud.root, {
+  view: processView,
+  inventory: () => save.inventory,
+  labelOf: (station) => STATION_KINDS[station.kind].label,
+  onLoad: (station) => {
+    if (!loadStation(station, save.inventory)) return;
+    soundAt('gatherSeaLettuce');
+    processPanel.render();
+    persist();
+  },
+  onCollect: (station) => {
+    const taken = collectStation(station);
+    if (!taken) return;
+    const output = PROCESS_RECIPES[station.kind].output;
+    save.inventory[output] = (save.inventory[output] || 0) + taken;
+    soundAt('gatherDriftwood');
+    hud.log('loot', `+${taken} ${RESOURCE_TYPES[output].label}`);
+    refreshHud(output);
+    processPanel.render();
+    persist();
+  },
+  onMove: (station) => startMovingStructure(station),
+  onDismantle: (station) => dismantleStructure(station),
+  onClose: () => processPanel.close(),
+});
 const STRANDED_FREE_SPOTS = [
   { id: 'beachPool', x: 34, z: -4 },
   { id: 'beachDriftwood', x: -16, z: -30 },
@@ -571,6 +617,7 @@ const helpers = createHelpers(scene, {
   burrow,
   boxOf,
   upkeepActive: () => burrow.hasStation('burrowHeart'),
+  boardTask: (helper) => boardTaskFor(helper),
   feedHelper: (helper) => {
     const pantries = burrow.state.stations.filter((station) => station.kind === 'pantry').map((station) => station.box);
     const nest = burrow.state.stations.find((station) => station.id === helper.nestId);
@@ -611,7 +658,9 @@ const helpersPanel = createHelpersPanel(hud.root, {
   helpers,
   limit: HELPER_LIMIT,
   jobOptions: helperJobOptions,
-  boxOptions: () => burrow.state.stations.filter((station) => station.kind === 'storage' || station.kind === 'helperNest').map((station) => ({ id: station.id, label: stationName(station) })),
+  boxOptions: () => burrow.state.stations.filter((station) => station.kind === 'storage' || station.kind === 'helperNest' || station.kind === 'pantry').map((station) => ({ id: station.id, label: stationName(station) })),
+  satchelInfo: (helper) => (helper.satchel ? `Satchel · carries ${SATCHEL_LOAD} per trip` : burrow.hasStation('burrowHeart') ? { cost: SATCHEL_CORD_COST, have: save.inventory.cord || 0 } : null),
+  onSatchel: (id) => giveSatchel(id),
   onJob: (id, job, carryOrder) => {
     helpers.setJob(id, job, carryOrder);
     persist();
@@ -681,7 +730,98 @@ function helperJobOptions(helper) {
   const gatherable = Object.entries(RESOURCE_TYPES).filter(([type, definition]) => definition.count > 0 && (known.has(type) || ALWAYS_KNOWN_MATERIALS.has(type))).map(([type, definition]) => ({ value: type, label: `Gather ${definition.label.toLowerCase()}` }));
   const follower = helpers.follower();
   const follow = !follower || follower === helper ? [{ value: 'follow', label: 'Follow and help you' }] : [];
-  return [{ value: '', label: 'No job · rest in the nest' }, ...follow, ...gatherable, { value: 'rack', label: 'Tend station: drying rack' }, { value: 'carry', label: 'Carry between boxes' }];
+  const board = burrow.hasStation('burrowHeart') ? [{ value: 'board', label: 'Board · take job board orders' }] : [];
+  const tend = burrow.state.stations.filter(isProcessStation).map((station) => ({ value: `tend:${station.id}`, label: `Tend station: ${stationName(station).toLowerCase()}` }));
+  return [{ value: '', label: 'No job · rest in the nest' }, ...board, ...follow, ...gatherable, { value: 'rack', label: 'Tend station: drying rack' }, ...tend, { value: 'carry', label: 'Carry between boxes' }];
+}
+
+const BOARD_HELPERS_PER_ORDER = 2;
+const BOARD_AMOUNTS = [5, 10, 20, 30, 50];
+const DEFAULT_PANTRY_ORDER = 10;
+
+function boardOrders() {
+  save.board ||= { orders: [], nextId: 1 };
+  return save.board.orders;
+}
+
+function boxCount(stationId, material) {
+  const box = boxOf(stationId);
+  return box ? box.inventory[material] || 0 : 0;
+}
+
+function orderMethod(order) {
+  const known = noteDiscoveries();
+  const definition = RESOURCE_TYPES[order.material];
+  if (definition && definition.count > 0 && (known.has(order.material) || ALWAYS_KNOWN_MATERIALS.has(order.material))) return { job: order.material, deliverToId: order.toId };
+  if (order.material === 'driedKelp' && rack.exists) return { job: 'rack', deliverToId: order.toId };
+  const processStation = burrow.state.stations.find((station) => isProcessStation(station) && PROCESS_RECIPES[station.kind].output === order.material);
+  if (processStation) return { job: `tend:${processStation.id}`, deliverToId: order.toId };
+  const source = burrow.state.stations.find((station) => station.id !== order.toId && boxOf(station.id) && boxCount(station.id, order.material) > 0);
+  if (source) return { job: 'carry', carryOrder: { fromId: source.id, toId: order.toId, material: order.material } };
+  return null;
+}
+
+function boardTaskFor(helper) {
+  helper.boardOrderId = null;
+  for (const order of boardOrders()) {
+    if (!boxOf(order.toId) || boxCount(order.toId, order.material) >= order.amount) continue;
+    const busy = helpers.list.filter((other) => other !== helper && other.job === 'board' && other.boardOrderId === order.id && other.state !== 'resting').length;
+    if (busy >= BOARD_HELPERS_PER_ORDER) continue;
+    const method = orderMethod(order);
+    if (!method) continue;
+    helper.boardOrderId = order.id;
+    return method;
+  }
+  return null;
+}
+
+function addBoardOrder(material, toId, amount) {
+  if (!RESOURCE_TYPES[material] || !boxOf(toId)) return false;
+  const orders = boardOrders();
+  orders.push({ id: save.board.nextId++, material, toId, amount });
+  persist();
+  return true;
+}
+
+function moveBoardOrder(id, offset) {
+  const orders = boardOrders();
+  const index = orders.findIndex((order) => order.id === id);
+  const target = index + offset;
+  if (index < 0 || target < 0 || target >= orders.length) return false;
+  [orders[index], orders[target]] = [orders[target], orders[index]];
+  persist();
+  return true;
+}
+
+function removeBoardOrder(id) {
+  const orders = boardOrders();
+  const index = orders.findIndex((order) => order.id === id);
+  if (index < 0) return false;
+  orders.splice(index, 1);
+  persist();
+  return true;
+}
+
+function boardView() {
+  return boardOrders().map((order) => {
+    const station = burrow.state.stations.find((candidate) => candidate.id === order.toId);
+    const method = orderMethod(order);
+    const have = boxCount(order.toId, order.material);
+    const workers = helpers.list.filter((helper) => helper.job === 'board' && helper.boardOrderId === order.id && helper.state !== 'resting').length;
+    const status = !station ? 'Box gone' : have >= order.amount ? 'Done' : !method ? 'No way to get it yet' : `${workers} working`;
+    return { id: order.id, text: `${RESOURCE_TYPES[order.material].icon} ${have}/${order.amount} ${RESOURCE_TYPES[order.material].label.toLowerCase()} in ${station ? stationName(station) : '—'}`, status };
+  });
+}
+
+function giveSatchel(helperId) {
+  const helper = helpers.list.find((candidate) => candidate.id === helperId);
+  if (!helper || helper.satchel || (save.inventory.cord || 0) < SATCHEL_CORD_COST) return false;
+  save.inventory.cord -= SATCHEL_CORD_COST;
+  helper.satchel = true;
+  hud.log('helper', `${helpers.nameOf(helper)} got a satchel — carries ${SATCHEL_LOAD} per trip`);
+  if (helpersPanel.isOpen) helpersPanel.render();
+  persist();
+  return true;
 }
 
 function stationName(station) {
@@ -705,7 +845,8 @@ function rescueHelperAt(spot) {
   const helper = helpers.rescue(spot);
   if (!helper) return null;
   soundAt('recoverRemains');
-  hud.log('helper', 'A helper crab joined your nest — give it a job from Helpers');
+  if (burrow.hasStation('burrowHeart')) helpers.setJob(helper.id, 'board');
+  hud.log('helper', burrow.hasStation('burrowHeart') ? 'A helper crab joined your nest — it takes orders from the job board' : 'A helper crab joined your nest — give it a job from Helpers');
   refreshHud(null);
   persist();
   return helper;
@@ -783,7 +924,7 @@ const statusPanel = createStatusPanel(hud.root, {
 });
 
 function anyPanelOpen() {
-  return mapView.isOpen || statusPanel.isOpen || workbenchPanel.isOpen || moltPanel.isOpen || backpack.isOpen || buildPanel.isOpen || storagePanel.isOpen || helpersPanel.isOpen || rackPanel.isOpen;
+  return mapView.isOpen || statusPanel.isOpen || workbenchPanel.isOpen || moltPanel.isOpen || backpack.isOpen || buildPanel.isOpen || storagePanel.isOpen || helpersPanel.isOpen || rackPanel.isOpen || processPanel.isOpen || boardPanel.isOpen;
 }
 
 function closePanels() {
@@ -795,6 +936,8 @@ function closePanels() {
   storagePanel.close();
   helpersPanel.close();
   rackPanel.close();
+  processPanel.close();
+  boardPanel.close();
 }
 
 const destinationMarker = new THREE.Mesh(
@@ -1093,8 +1236,10 @@ function buildStation(kind, column, row, { free = false } = {}) {
     const free = burrow.space.nearestWalkable(spot.x, spot.z);
     if (free) Object.assign(player, { x: free.x, z: free.z });
   }
+  if (kind === 'burrowHeart') for (const helper of helpers.list) if (!helper.job) helpers.setJob(helper.id, 'board');
+  if (kind === 'pantry' && !boardOrders().length) addBoardOrder('driedKelp', station.id, DEFAULT_PANTRY_ORDER);
   soundAt('craft');
-  hud.log('build', { workshop: 'Workshop built — tap it to craft', exit: free ? 'Exit moved' : 'Exit dug — walk to it to go up', crabBed: 'Crab bed built — tap it to sleep' }[kind] || `${definition.label} built — tap it to open`);
+  hud.log('build', { workshop: 'Workshop built — tap it to craft', burrowHeart: 'Burrow heart built — tap it for the job board', exit: free ? 'Exit moved' : 'Exit dug — walk to it to go up', crabBed: 'Crab bed built — tap it to sleep' }[kind] || `${definition.label} built — tap it to open`);
   refreshHud(null);
   persist();
   return true;
@@ -1148,8 +1293,6 @@ function walkToRack() {
 
 const NEST_LIMIT_BY_STAGE = { 1: 1, 2: 2 };
 const SAND_PER_DUG_CELL = 2;
-const HELPER_MEAL_MINUTES = HELPER_MEAL_SECONDS / 60;
-const HELPER_MEAL = RESOURCE_TYPES.driedKelp;
 const burrowStage = () => (burrow.hasStation('burrowHeart') ? 2 : 1);
 
 function stationBuildProblem(kind) {
@@ -1429,7 +1572,8 @@ function openStation(station) {
   else if (station.kind === 'exit') hud.bumpTravel();
   else if (station.kind === 'crabBed') startSleeping(station);
   else if (station.kind === 'helperNest' || station.kind === 'pantry') storagePanel.open(station.box, { station, title: stationName(station) });
-  else if (station.kind === 'burrowHeart') hud.log('progress', `Burrow heart · Colony stage — up to ${NEST_LIMIT_BY_STAGE[2]} nests, helpers eat ${HELPER_MEAL.label.toLowerCase()} every ${HELPER_MEAL_MINUTES} min`);
+  else if (isProcessStation(station)) processPanel.open(station);
+  else if (station.kind === 'burrowHeart') boardPanel.open();
   else storagePanel.open(storage, { station, title: 'Storage' });
 }
 
@@ -1646,7 +1790,7 @@ const RACK_MOVE_RADIUS = 12;
 const RACK_ENTRANCE_CLEARANCE = 3;
 
 function closeStructurePanels() {
-  for (const panel of [workbenchPanel, storagePanel, rackPanel]) if (panel.isOpen) panel.close();
+  for (const panel of [workbenchPanel, storagePanel, rackPanel, processPanel]) if (panel.isOpen) panel.close();
 }
 
 function startMovingStructure(target) {
@@ -1750,6 +1894,11 @@ function dismantleStructure(target) {
     const station = targetStation;
     if (!station) return false;
     if (player.walkGoal === station) stopWalking();
+    if (isProcessStation(station)) {
+      const { recipe, working, ready } = processView(station);
+      if (working.length) refund[recipe.input] = (refund[recipe.input] || 0) + working.length * recipe.inputAmount;
+      if (ready) refund[recipe.output] = (refund[recipe.output] || 0) + ready;
+    }
     burrow.removeStation(station);
     if (kind === 'workshop') workshop.remove();
     save.burrow = burrow.serialize();
@@ -2455,6 +2604,12 @@ function simulate(deltaTime) {
   if (underground) Object.assign(surfaceProbe, { x: burrow.state.entrance.x, z: burrow.state.entrance.z });
   enemies.update(deltaTime, simulationTime, underground ? surfaceProbe : player);
   rack.update(deltaTime);
+  tickStations(burrow.state.stations, deltaTime);
+  processRefreshTimer -= deltaTime;
+  if (processPanel.isOpen && processRefreshTimer <= 0) {
+    processRefreshTimer = 1;
+    processPanel.render();
+  }
   helpers.update(deltaTime, simulationTime);
   updateHealth(deltaTime);
   updateBodyWetness(deltaTime);
@@ -3166,7 +3321,7 @@ if (isScreenshotMode) {
 }
 
 window.__debug = {
-  hud, setShowPerformance, surfacePointAbovePlayer, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
+  hud, setShowPerformance, openStation, addBoardOrder, moveBoardOrder, removeBoardOrder, boardView, giveSatchel, boardOrders, processPanel, boardPanel, surfacePointAbovePlayer, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
   tracks, ripples, hermit, gear, hitPlayer, strike, workshop, workbenchPanel, salvageItem, startMovingStructure, dismantleStructure, removeTravelPoint, startMovingExit, handleTravelAction, travelActions, moveStationTo, moveRackTo, isRecipeDiscovered, placement, cancelPlacement, backpack, openBackpack, buildWorkshop, craftItem, wearItem, unequipItem, walkToWorkshop, setDestination, setPaused, handleTap, renderScene, updateCamera, seaLevelAt,
   audio, isAudioUnlocked: () => audioUnlocked, progression, statusPanel, difficultyOf, experienceForKill, enemies, remains, engage, die, recoverRemains, playerStats, randomSource, upgradeTools, refineItem, modifyItem, startMolt, finishMolt, isMolting, isSoft, moltPanel, rack, rackPanel, buildRackStation, eatKelp, useConsumable, craftSupply, assignQuickSlot, quickSlots, isWellFed, walkToRack, helpers, helpersPanel, equipHelper, openMap, startFillMode, startFillCell, startSleeping, wakeUp, isRested, mapView, fog, exitCellProblem, chooseStation, nearestTravelPoint, rescueHelperAt, walkToStranded, burrow, storage, storagePanel, buildPanel, enterBurrow, exitBurrow, travel, travelOption, walkToShaft, cameraDistanceFor, getCameraDistance: () => cameraDistance, digEntranceAt, chooseEntranceSpot, startEntrancePlacement, buildStation, stationBuildProblem, burrowStage, rackSpotProblem, startDigCell, previewEntranceSpot, walkToEntrance, walkToStation, isUnderground: () => underground, entranceSpotProblem, wakeSpot, persist, startOver,
   setCameraDistance: (distance) => { cameraDistance = distance; },

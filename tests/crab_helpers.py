@@ -102,7 +102,7 @@ with sync_playwright() as playwright:
         'needsNest': flow['refusedWithoutNest'] and flow['nestBuilt'],
         'rescueFreeHelpers': flow['freeRescued'] == [True, True, True],
         'guardAndCapacity': flow['guardedRefused'] and flow['fullNestRefused'] and flow['secondNest'] and flow['guardedRescued'] and flow['helperCount'] == 4,
-        'rescuedWithoutJob': flow['jobsAtStart'] == [None, None, None, None],
+        'rescuedOnBoardAfterHeart': flow['jobsAtStart'] == ['board', 'board', 'board', 'board'],
         'gatherEveryJobIncludingFar': all(boxes.get(job, 0) >= 1 for job in ('shellBits', 'driftwood', 'seaLettuce', 'coral')) and boxes.get('shellBits', 0) >= 2,
         'noSharedTargets': not flow['sharedTarget'],
         'knockedOutGoesHomeWithoutJob': flow['runnerOutside'] and flow['knockedOut']['inside'] and flow['knockedOut']['job'] is None and flow['knockedOut']['count'] == 4 and 'nest' in flow['knockedOut']['toast'],

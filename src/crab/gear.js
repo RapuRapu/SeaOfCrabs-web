@@ -137,6 +137,7 @@ export const BINDINGS = {
 };
 
 export const REINFORCEMENTS = {
+  limeCoat: { label: 'Lime coat', cost: { shellLime: 2, clay: 1 }, description: '+15% armour', defenseShare: 0.15 },
   coralCrust: { label: 'Coral crust', cost: { coral: 3, shellBits: 2 }, description: '+20% armour', defenseShare: 0.2 },
   metalPlate: { label: 'Metal plate', cost: { scrap: 3, cloth: 1 }, description: '+35% armour, −5% speed', defenseShare: 0.35, speedFactor: 0.95 },
   boneSpikes: { label: 'Bone spikes', cost: { fishBone: 3 }, description: 'attackers take 3 damage', thorns: 3 },

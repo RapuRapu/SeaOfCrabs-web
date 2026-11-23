@@ -80,6 +80,8 @@ export const STATION_KINDS = {
   crabBed: { label: 'Crab bed', icon: '🛏️', cost: { seaLettuce: 4, driftwood: 2 }, description: 'Sleep to heal fast. You wake up rested: faster healing and +10% speed for 15 min.' },
   exit: { label: 'Exit', icon: '⬆', cost: { driftwood: 2 }, description: 'A tunnel up to the surface. Only to explored dry sand, and not near bosses.', multiple: true },
   burrowHeart: { label: 'Burrow heart', icon: '💗', cost: { pearls: 3, pebbles: 6, clay: 6, driftwood: 4 }, description: 'The colony begins: up to 2 helper nests (6 helpers) and the pantry. Helpers start to eat dried kelp.' },
+  ropeWalk: { label: 'Rope walk', icon: '🪢', cost: { driftwood: 4, pebbles: 2 }, description: 'Twists 3 kelp into 1 cord in 40 s. Two at a time.', requires: 'burrowHeart' },
+  grinder: { label: 'Grinder', icon: '🪨', cost: { pebbles: 6, clay: 2 }, description: 'Grinds 4 shell bits into 1 shell lime in 30 s. Two at a time.', requires: 'burrowHeart' },
   pantry: { label: 'Pantry', icon: '🧺', cost: { clay: 4, driftwood: 3 }, description: 'Food store. Helpers eat dried kelp from here before their nest box.', requires: 'burrowHeart' },
   dryingRack: { label: 'Drying rack', icon: '🍂', cost: { driftwood: 4, shellBits: 2 }, description: 'Built in the sun beside your burrow entrance. Dries 3 sea lettuce into 1 dried kelp in 60 s.', surface: true },
 };
@@ -288,6 +290,44 @@ function buildHeartGeometry() {
   }));
 }
 
+function mergeParts(parts) {
+  return mergeGeometries(parts.map((geometry) => {
+    geometry.deleteAttribute('uv');
+    return geometry.index ? geometry.toNonIndexed() : geometry;
+  }));
+}
+
+function buildRopeWalkGeometry() {
+  const wood = linearColor(0.48, 0.34, 0.2);
+  const rope = linearColor(0.62, 0.52, 0.24);
+  const parts = [];
+  for (const side of [-0.9, 0.9]) {
+    parts.push(colorize(new THREE.BoxGeometry(0.16, 0.9, 0.16).translate(side, 0.45, 0), (color) => color.copy(wood)));
+    parts.push(colorize(new THREE.CylinderGeometry(0.2, 0.2, 0.1, 10).rotateZ(Math.PI / 2).translate(side, 0.78, 0), (color) => color.copy(wood).multiplyScalar(0.8)));
+  }
+  parts.push(colorize(new THREE.BoxGeometry(2.1, 0.1, 0.5).translate(0, 0.05, 0), (color) => color.copy(wood).multiplyScalar(0.7)));
+  for (let strand = 0; strand < 3; strand++) {
+    const curve = new THREE.CatmullRomCurve3([new THREE.Vector3(-0.9, 0.78, -0.06 + strand * 0.06), new THREE.Vector3(0, 0.7 - strand * 0.02, 0), new THREE.Vector3(0.9, 0.78, 0.06 - strand * 0.06)]);
+    parts.push(colorize(new THREE.TubeGeometry(curve, 16, 0.04, 6), (color, x) => color.copy(rope).multiplyScalar(0.85 + 0.2 * Math.sin(x * 20 + strand))));
+  }
+  return mergeParts(parts);
+}
+
+function buildGrinderGeometry() {
+  const stone = linearColor(0.55, 0.55, 0.53);
+  const stoneDark = linearColor(0.38, 0.38, 0.37);
+  const shell = linearColor(0.92, 0.86, 0.78);
+  const parts = [];
+  parts.push(colorize(new THREE.CylinderGeometry(0.85, 0.9, 0.3, 18).translate(0, 0.15, 0), (color, x, y) => color.copy(stoneDark).lerp(stone, y / 0.3)));
+  parts.push(colorize(new THREE.CylinderGeometry(0.6, 0.6, 0.28, 18).translate(0, 0.44, 0), (color, x, y, z) => color.copy(stone).multiplyScalar(0.85 + 0.2 * Math.sin(Math.atan2(z, x) * 6))));
+  parts.push(colorize(new THREE.CylinderGeometry(0.06, 0.06, 0.7, 8).rotateZ(Math.PI / 2.4).translate(0.45, 0.75, 0), (color) => color.setRGB(0.45, 0.32, 0.18)));
+  for (let bit = 0; bit < 6; bit++) {
+    const angle = bit * 1.1;
+    parts.push(colorize(new THREE.TetrahedronGeometry(0.09).translate(Math.cos(angle) * 0.75, 0.32, Math.sin(angle) * 0.75), (color) => color.copy(shell)));
+  }
+  return mergeParts(parts);
+}
+
 function buildPantryGeometry() {
   const clayColor = linearColor(0.62, 0.42, 0.3);
   const kelp = linearColor(0.5, 0.36, 0.14);
@@ -388,6 +428,8 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   const bedGeometry = buildBedGeometry();
   const heartGeometry = buildHeartGeometry();
   const pantryGeometry = buildPantryGeometry();
+  const ropeWalkGeometry = buildRopeWalkGeometry();
+  const grinderGeometry = buildGrinderGeometry();
   const chunkMaterial = new THREE.MeshStandardMaterial({ color: WALL_COLOR, roughness: 0.95, transparent: true });
   const chunkGeometry = new THREE.IcosahedronGeometry(0.3, 1);
   const chunks = new THREE.InstancedMesh(chunkGeometry, chunkMaterial, DIG_CHUNK_STEPS * CHUNKS_PER_STEP * 2);
@@ -587,7 +629,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
       addExitMeshes(station);
       return;
     }
-    const geometry = { helperNest: nestGeometry, crabBed: bedGeometry, burrowHeart: heartGeometry, pantry: pantryGeometry }[station.kind] || storageGeometry;
+    const geometry = { helperNest: nestGeometry, crabBed: bedGeometry, burrowHeart: heartGeometry, pantry: pantryGeometry, ropeWalk: ropeWalkGeometry, grinder: grinderGeometry }[station.kind] || storageGeometry;
     const mesh = new THREE.Mesh(geometry, storageMaterial);
     mesh.castShadow = true;
     mesh.receiveShadow = true;

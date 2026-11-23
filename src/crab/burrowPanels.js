@@ -267,7 +267,7 @@ function addSelect(parent, label, options, value, onChange) {
 
 const ITEM_USE_LABELS = { both: 'Itself and you', self: 'Itself', you: 'You', nobody: 'Nobody' };
 
-export function createHelpersPanel(root, { helpers, limit, jobOptions, boxOptions, gearOptions, helperInfo, foodSummary = () => null, onJob, onEquip, giveOptions = () => [], onGiveItem = () => {}, onTakeItem = () => {}, onItemUse = () => {}, onClose }) {
+export function createHelpersPanel(root, { helpers, limit, jobOptions, boxOptions, gearOptions, helperInfo, foodSummary = () => null, satchelInfo = () => null, onSatchel = () => {}, onJob, onEquip, giveOptions = () => [], onGiveItem = () => {}, onTakeItem = () => {}, onItemUse = () => {}, onClose }) {
   const shell = createPanelShell(root, 'helpers-panel', 'Helpers', onClose);
   const statusLines = new Map();
 
@@ -339,6 +339,15 @@ export function createHelpersPanel(root, { helpers, limit, jobOptions, boxOption
       element('div', 'item-name', text, `Helper ${index + 1} · Lv ${info.level} · ${Math.max(0, Math.ceil(helper.health))}/${info.maxHealth} HP`);
       element('div', 'item-stats', text, `Attack ${info.attack} · Defense ${info.defense} · XP ${info.experience}/${info.toNext}`);
       if (info.food) element('div', info.hungry ? 'item-ability danger helper-food' : 'item-stats helper-food', text, info.food);
+      const satchel = satchelInfo(helper);
+      if (typeof satchel === 'string') element('div', 'item-stats', text, satchel);
+      else if (satchel) {
+        const satchelRow = element('div', 'job-row', text);
+        const satchelButton = element('button', 'item-action', satchelRow, `Make satchel · ${satchel.cost} cord (have ${satchel.have})`);
+        satchelButton.dataset.satchel = String(helper.id);
+        satchelButton.disabled = satchel.have < satchel.cost;
+        satchelButton.addEventListener('click', () => onSatchel(helper.id));
+      }
       statusLines.set(helper, element('div', helper.state === 'fleeing' ? 'item-ability danger' : 'item-stats', text, helperStatus(helper)));
       const jobRow = element('div', 'job-row', text);
       const select = addSelect(jobRow, 'Job', jobOptions(helper), helper.job || '', (value) => changeJob(helper, value, null));
@@ -430,6 +439,112 @@ export function createRackPanel(root, { rack, inventory, batch, drySeconds, onLo
     get isPressed() {
       return pressed;
     },
+    get isOpen() {
+      return shell.isOpen;
+    },
+    open() {
+      render();
+      shell.show();
+    },
+    close: () => shell.hide(),
+    render,
+  };
+}
+
+export function createProcessPanel(root, { view, inventory, labelOf, onLoad, onCollect, onMove, onDismantle, onClose }) {
+  const shell = createPanelShell(root, 'process-panel', 'Station', onClose);
+  let currentStation = null;
+
+  function render() {
+    shell.body.replaceChildren();
+    if (!currentStation) return;
+    const { recipe, working, ready, free } = view(currentStation);
+    shell.setTitle(labelOf(currentStation));
+    element('div', 'summary', shell.body, `${recipe.inputAmount} ${RESOURCE_TYPES[recipe.input].label.toLowerCase()} → 1 ${RESOURCE_TYPES[recipe.output].label.toLowerCase()} in ${recipe.seconds} s. ${recipe.slots} at a time.`);
+    const slots = element('div', 'rack-slots', shell.body);
+    for (let index = 0; index < recipe.slots; index++) {
+      const secondsLeft = working[index];
+      const slot = element('div', secondsLeft === undefined ? 'rack-slot empty' : 'rack-slot', slots);
+      element('div', 'rack-slot-label', slot, secondsLeft === undefined ? 'Empty' : `Working · ${secondsLeft} s left`);
+      if (secondsLeft !== undefined) element('div', 'rack-fill', element('div', 'rack-bar', slot)).style.width = `${Math.round((1 - secondsLeft / recipe.seconds) * 100)}%`;
+    }
+    const have = inventory()[recipe.input] || 0;
+    const loadRow = element('div', 'item', shell.body);
+    const loadText = element('div', 'item-text', loadRow);
+    element('div', 'item-name', loadText, `Load ${recipe.inputAmount} ${RESOURCE_TYPES[recipe.input].label.toLowerCase()}`);
+    element('div', have >= recipe.inputAmount ? 'item-stats' : 'item-stats short-text', loadText, `You have ${have}`);
+    const loadButton = element('button', 'item-action', loadRow, 'Load');
+    loadButton.dataset.processLoad = '1';
+    loadButton.disabled = have < recipe.inputAmount || free === 0;
+    loadButton.addEventListener('click', () => onLoad(currentStation));
+    const collectRow = element('div', ready ? 'item ready-row' : 'item', shell.body);
+    element('div', 'item-name', element('div', 'item-text', collectRow), `Ready: ${ready} ${RESOURCE_TYPES[recipe.output].label.toLowerCase()}`);
+    const collectButton = element('button', 'item-action take', collectRow, 'Collect');
+    collectButton.dataset.processCollect = '1';
+    collectButton.disabled = ready === 0;
+    collectButton.addEventListener('click', () => onCollect(currentStation));
+    renderStructureActions(shell.body, { label: labelOf(currentStation).toLowerCase(), onMove: () => onMove(currentStation), onDismantle: () => onDismantle(currentStation) });
+  }
+
+  return {
+    get isOpen() {
+      return shell.isOpen;
+    },
+    get station() {
+      return currentStation;
+    },
+    open(station) {
+      currentStation = station;
+      render();
+      shell.show();
+    },
+    close: () => shell.hide(),
+    render,
+  };
+}
+
+export function createBoardPanel(root, { orders, materialOptions, boxOptions, amounts, onAdd, onMove, onRemove, onClose }) {
+  const shell = createPanelShell(root, 'board-panel', 'Job board', onClose);
+  let draft = { material: null, toId: null, amount: 10 };
+
+  function render() {
+    shell.body.replaceChildren();
+    element('div', 'summary', shell.body, 'Helpers on the Board job take the first unmet order they can do: gather it, run a station that makes it, or carry it from another box. Up to 2 helpers per order.');
+    const list = orders();
+    if (!list.length) element('div', 'placeholder', shell.body, 'No orders yet.');
+    list.forEach((order, index) => {
+      const row = element('div', 'item board-order', shell.body);
+      row.dataset.order = String(order.id);
+      const text = element('div', 'item-text', row);
+      element('div', 'item-name', text, `${index + 1}. ${order.text}`);
+      element('div', order.status === 'No way to get it yet' || order.status === 'Box gone' ? 'item-ability danger' : 'item-stats', text, order.status);
+      for (const [label, offset] of [['↑', -1], ['↓', 1]]) {
+        const button = element('button', 'item-action secondary', row, label);
+        button.disabled = (offset < 0 && index === 0) || (offset > 0 && index === list.length - 1);
+        button.addEventListener('click', () => onMove(order.id, offset));
+      }
+      const remove = element('button', 'item-action secondary', row, '✕');
+      remove.dataset.removeOrder = String(order.id);
+      remove.addEventListener('click', () => onRemove(order.id));
+    });
+    const materials = materialOptions();
+    const boxes = boxOptions();
+    if (!draft.material || !materials.some((option) => option.value === draft.material)) draft.material = materials[0] ? materials[0].value : null;
+    if (!boxes.some((option) => option.value === draft.toId)) draft.toId = boxes[0] ? boxes[0].value : null;
+    const addRow = element('div', 'item board-add', shell.body);
+    const addText = element('div', 'item-text', addRow);
+    element('div', 'item-name', addText, 'New order: keep at least');
+    const pick = (label, options, value, change) => addSelect(addText, label, options, value, change);
+    pick('Amount', amounts().map((amount) => ({ value: amount, label: String(amount) })), draft.amount, (value) => { draft.amount = Number(value); });
+    pick('Material', materials, draft.material, (value) => { draft.material = value; }).dataset.boardMaterial = '1';
+    pick('Box', boxes, draft.toId, (value) => { draft.toId = Number(value); }).dataset.boardBox = '1';
+    const add = element('button', 'item-action', addRow, 'Add');
+    add.dataset.addOrder = '1';
+    add.disabled = !draft.material || draft.toId === null;
+    add.addEventListener('click', () => onAdd(draft.material, draft.toId, draft.amount));
+  }
+
+  return {
     get isOpen() {
       return shell.isOpen;
     },

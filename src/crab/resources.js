@@ -26,6 +26,8 @@ export const RESOURCE_TYPES = {
   wax: { label: 'Candle wax', icon: '🕯️', count: 8, gatherSeconds: 1.3, standOff: 1.3 },
   driedKelp: { label: 'Dried kelp', icon: '🍂', count: 0 },
   kelpPoultice: { label: 'Kelp poultice', icon: '🩹', count: 0 },
+  cord: { label: 'Cord', icon: '🪢', count: 0 },
+  shellLime: { label: 'Shell lime', icon: '🧂', count: 0 },
   gullFeather: { label: 'Gull feather', icon: '🪶', count: 0 },
   lobsterPlate: { label: 'Lobster plate', icon: '🦞', count: 0 },
   catWhisker: { label: 'Cat whisker', icon: '🐾', count: 0 },
