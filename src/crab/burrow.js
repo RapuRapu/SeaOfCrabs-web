@@ -26,7 +26,8 @@ const LEGACY_GRID = 11;
 const SAND_CHUNK_CELLS = 5;
 const DETAIL_MARGIN_CELLS = 2;
 const OPEN_DISTANCE_REACH = 4;
-const WALL_HEIGHT = 1.05;
+const WALL_HEIGHT = 1.9;
+const OCCLUSION_SAMPLES = 48;
 const BORDER_RING = 2;
 const PLAYER_CLEARANCE = 0.55;
 const STATION_BLOCK_RADIUS = 1.15;
@@ -410,11 +411,11 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
 
   const interior = new THREE.Group();
   interior.position.set(BURROW_ORIGIN.x, BURROW_ORIGIN.y, BURROW_ORIGIN.z);
-  const floorMaterial = applyBurrowSurface(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96 }), 'floor', BURROW_ORIGIN.y);
+  const floorMaterial = applyBurrowSurface(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96 }), 'floor', BURROW_ORIGIN.y, WALL_HEIGHT);
   const floor = new THREE.Mesh(buildFloorGeometry(), floorMaterial);
   floor.receiveShadow = true;
   interior.add(floor);
-  const sandMaterial = applyBurrowSurface(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94 }), 'sand', BURROW_ORIGIN.y);
+  const sandMaterial = applyBurrowSurface(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94 }), 'sand', BURROW_ORIGIN.y, WALL_HEIGHT);
   const sandChunks = [];
   for (let firstRow = BURROW_CELL_MIN - BORDER_RING; firstRow <= BURROW_CELL_MAX + BORDER_RING; firstRow += SAND_CHUNK_CELLS) {
     for (let firstColumn = BURROW_CELL_MIN - BORDER_RING; firstColumn <= BURROW_CELL_MAX + BORDER_RING; firstColumn += SAND_CHUNK_CELLS) {
@@ -530,7 +531,20 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     const filled = total / weight;
     const exitDistance = Math.hypot(x - (shaftCenter.x - BURROW_ORIGIN.x), z - (shaftCenter.z - BURROW_ORIGIN.z) - BURROW_CELL * 0.6);
     const exitRise = state.entranceClosed ? 0 : (EXIT_SAND_HEIGHT - WALL_HEIGHT) * (1 - THREE.MathUtils.smoothstep(exitDistance, BURROW_CELL * 0.9, BURROW_CELL * 2.3));
-    return THREE.MathUtils.smoothstep(filled, 0.38, 0.98) * (WALL_HEIGHT + exitRise) * (1 + 0.1 * sandNoise(x * 0.45, z * 0.45));
+    const rise = THREE.MathUtils.smoothstep(filled, 0.44, 0.76);
+    const clods = THREE.MathUtils.smoothstep(filled, 0.8, 1) * 0.16 * sandNoise(x * 1.7 + 5, z * 1.7 - 3);
+    return rise * (WALL_HEIGHT + exitRise) * (1 + 0.08 * sandNoise(x * 0.45, z * 0.45)) + clods;
+  }
+
+  function wallBlocksView(from, to) {
+    for (let step = 1; step < OCCLUSION_SAMPLES; step++) {
+      const share = step / OCCLUSION_SAMPLES;
+      const x = from.x + (to.x - from.x) * share - BURROW_ORIGIN.x;
+      const y = from.y + (to.y - from.y) * share - BURROW_ORIGIN.y;
+      const z = from.z + (to.z - from.z) * share - BURROW_ORIGIN.z;
+      if (y < WALL_HEIGHT * 1.3 && y < sandHeightAt(x, z) - 0.05) return true;
+    }
+    return false;
   }
 
   function chunkNeedsDetail(chunk) {
@@ -1143,6 +1157,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     showExitSpots,
     addExit,
     removeExit,
+    wallBlocksView,
     restoreExit,
     closeEntrance,
     get entranceOpen() {

@@ -529,6 +529,25 @@ const rackPanel = createRackPanel(hud.root, {
   onClose: () => rackPanel.close(),
 });
 let processRefreshTimer = 0;
+const hiddenCrabMarker = new THREE.Mesh(new THREE.RingGeometry(0.75, 1.0, 36).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(2.2, 0.45, 0.25), transparent: true, opacity: 0.8, depthTest: false, depthWrite: false }));
+hiddenCrabMarker.renderOrder = 12;
+hiddenCrabMarker.visible = false;
+hiddenCrabMarker.layers.enable(BURROW_LAYER);
+scene.add(hiddenCrabMarker);
+const crabViewTarget = new THREE.Vector3();
+let hiddenCrabCheckTimer = 0;
+const HIDDEN_CRAB_CHECK_SECONDS = 0.15;
+
+function updateHiddenCrabMarker(deltaTime) {
+  if (hiddenCrabMarker.visible) hiddenCrabMarker.position.set(player.x, player.y + 0.12, player.z);
+  hiddenCrabCheckTimer -= deltaTime;
+  if (hiddenCrabCheckTimer > 0) return;
+  hiddenCrabCheckTimer = HIDDEN_CRAB_CHECK_SECONDS;
+  crabViewTarget.set(player.x, player.y + 0.35, player.z);
+  const hidden = underground && burrow.wallBlocksView(camera.position, crabViewTarget);
+  hiddenCrabMarker.visible = hidden;
+  if (hidden) hiddenCrabMarker.position.set(player.x, player.y + 0.12, player.z);
+}
 const boardPanel = createBoardPanel(hud.root, {
   orders: () => boardView(),
   materialOptions: () => {
@@ -2632,6 +2651,7 @@ function simulate(deltaTime) {
   if (underground) Object.assign(surfaceProbe, { x: burrow.state.entrance.x, z: burrow.state.entrance.z });
   enemies.update(deltaTime, simulationTime, underground ? surfaceProbe : player);
   rack.update(deltaTime);
+  updateHiddenCrabMarker(deltaTime);
   tickStations(burrow.state.stations, deltaTime);
   processRefreshTimer -= deltaTime;
   if (processPanel.isOpen && processRefreshTimer <= 0) {

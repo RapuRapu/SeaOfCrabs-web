@@ -2,6 +2,7 @@ const SURFACE_NOISE = /* glsl */ `
 varying vec3 vSurfaceWorld;
 varying vec3 vSurfaceNormal;
 uniform float uSurfaceBaseY;
+uniform float uSurfaceWallHeight;
 
 float surfaceHash(vec2 point) {
   return fract(sin(dot(point, vec2(127.1, 311.7))) * 43758.5453);
@@ -59,23 +60,50 @@ vec3 surfaceTintAndHeight(out float height) {
   tint = mix(tint, vec3(1.25, 1.18, 1.08), flecks.x * 0.5);
   height = grain * 0.35 - damp * 0.15;
 #else
-  float up = smoothstep(0.55, 0.85, vSurfaceNormal.y);
+  float up = smoothstep(0.62, 0.9, vSurfaceNormal.y);
+  float steep = 1.0 - smoothstep(0.35, 0.6, vSurfaceNormal.y);
   float wallHeight = vSurfaceWorld.y - uSurfaceBaseY;
+  float heightShare = clamp(wallHeight / uSurfaceWallHeight, 0.0, 1.2);
   vec2 along = vec2(vSurfaceWorld.x + vSurfaceWorld.z, wallHeight);
-  float warp = surfaceFbm(ground * 0.6) * 0.22;
-  float strata = surfaceNoise(vec2((wallHeight + warp) * 7.0, 0.5));
-  float band = 0.5 + 0.5 * sin((wallHeight + warp) * 26.0);
+  float warp = surfaceFbm(ground * 0.6) * 0.18;
+  float layer = (wallHeight + warp * 2.0) * 2.4 + surfaceNoise(vec2(along.x * 0.25, 2.0)) * 0.6;
+  float layerIndex = floor(layer);
+  float layerTone = surfaceHash(vec2(layerIndex, 1.7));
+  float layerEdge = smoothstep(0.0, 0.18, fract(layer)) * (1.0 - smoothstep(0.82, 1.0, fract(layer)));
+  vec3 layerColor = layerTone < 0.33 ? vec3(0.66, 0.54, 0.42) : layerTone < 0.66 ? vec3(0.95, 0.86, 0.72) : vec3(1.12, 1.04, 0.9);
+  layerColor *= mix(0.9, 1.0, layerEdge);
   float scrape = surfaceNoise(vec2(along.x * 7.0, along.y * 0.9));
-  vec2 wallStones = surfaceStones(along * vec2(2.6, 3.2), 0.18);
-  vec3 sideTint = vec3(0.74 + 0.4 * strata) * mix(vec3(0.86, 0.82, 0.76), vec3(1.08, 1.04, 0.98), band);
-  sideTint *= 0.9 + 0.16 * scrape;
-  sideTint = mix(sideTint, mix(vec3(0.6, 0.6, 0.6), vec3(0.42, 0.3, 0.2), wallStones.y) * (0.8 + 0.3 * wallStones.x), smoothstep(0.0, 0.25, wallStones.x) * 0.85);
-  float sideHeight = band * 0.35 + scrape * 0.3 + grain * 0.2;
-  float lump = surfaceFbm(ground * 3.2);
-  vec3 topTint = vec3(1.0 + 0.24 * lump + 0.12 * grain);
-  float topHeight = lump * 0.7 + grain * 0.3;
-  height = mix(sideHeight, topHeight, up);
-  vec3 tint = mix(sideTint, topTint, up);
+  float grooveCoordinate = (along.x + along.y * 0.8) * 0.45;
+  float groove = (1.0 - smoothstep(0.1, 0.24, abs(fract(grooveCoordinate) - 0.5))) * step(0.6, surfaceHash(vec2(floor(grooveCoordinate), 9.1))) * smoothstep(0.15, 0.35, heightShare);
+  vec3 sideTint = layerColor * (0.92 + 0.14 * scrape) * mix(1.0, 0.6, groove);
+  vec2 wallStones = surfaceStones(along * vec2(2.4, 3.0), 0.16);
+  sideTint = mix(sideTint, mix(vec3(0.82, 0.78, 0.72), vec3(0.62, 0.5, 0.38), wallStones.y) * (0.85 + 0.3 * wallStones.x), smoothstep(0.0, 0.25, wallStones.x) * 0.8);
+  vec2 shells = surfaceStones(along * vec2(1.25, 1.5) + 17.0, mix(0.06, 0.4, step(0.66, layerTone)));
+  sideTint = mix(sideTint, vec3(1.7, 1.64, 1.5) * (0.8 + 0.3 * shells.x), smoothstep(0.0, 0.25, shells.x));
+  float rootColumn = floor(along.x * 0.55);
+  float rootLength = 0.45 + 0.4 * surfaceHash(vec2(rootColumn, 7.7));
+  float rootPresent = step(0.62, surfaceHash(vec2(rootColumn, 3.3))) * step(1.0 - rootLength, heightShare);
+  float rootLine = 1.0 - smoothstep(0.03, 0.12, abs(fract(along.x * 0.55 + (surfaceNoise(vec2(along.y * 2.2, rootColumn)) - 0.5) * 0.4) - 0.5));
+  float root = rootPresent * rootLine;
+  sideTint = mix(sideTint, vec3(0.2, 0.12, 0.07), root);
+  float damp = 1.0 - smoothstep(0.05, 0.4, wallHeight);
+  sideTint *= mix(1.0, 0.42, damp);
+  float lip = smoothstep(0.82, 0.95, heightShare) * (1.0 - up);
+  float underLip = smoothstep(0.62, 0.8, heightShare) * (1.0 - smoothstep(0.82, 0.9, heightShare));
+  sideTint *= mix(1.0, 0.8, underLip);
+  sideTint = mix(sideTint, vec3(1.3, 1.22, 1.08), lip * 0.55);
+  float sideHeight = layerEdge * 0.4 + scrape * 0.25 + grain * 0.2 + shells.x * 0.35 - root * 0.5 - groove * 0.6;
+  float lump = surfaceFbm(ground * 1.2);
+  float clod = smoothstep(0.55, 0.75, surfaceFbm(ground * 1.1 + 3.0));
+  float dampPatch = smoothstep(0.55, 0.7, surfaceFbm(ground * 0.4 + 21.0));
+  vec3 topTint = vec3(1.16 + 0.28 * lump + 0.05 * grain) * vec3(1.02, 1.0, 0.96);
+  topTint *= mix(1.0, 1.12, clod);
+  topTint *= mix(1.0, 0.8, dampPatch);
+  float topHeight = lump * 1.4 + grain * 0.15;
+  float rim = smoothstep(0.55, 0.7, vSurfaceNormal.y) * (1.0 - smoothstep(0.75, 0.88, vSurfaceNormal.y));
+  topTint = mix(topTint, vec3(1.45, 1.38, 1.24), rim * 0.6);
+  height = mix(mix(grain * 0.4, sideHeight, steep), topHeight, up);
+  vec3 tint = mix(mix(vec3(0.95 + 0.2 * lump), sideTint, steep), topTint, up);
 #endif
   return tint;
 }
@@ -93,12 +121,13 @@ vec3 surfaceBump(vec3 viewNormal, vec3 viewPosition, float height, float strengt
 }
 `;
 
-const BUMP_STRENGTH = { floor: 0.035, sand: 0.05 };
+const BUMP_STRENGTH = { floor: 0.035, sand: 0.07 };
 
-export function applyBurrowSurface(material, kind, baseY) {
+export function applyBurrowSurface(material, kind, baseY, wallHeight = 1) {
   material.defines = { ...(material.defines || {}), ...(kind === 'floor' ? { BURROW_FLOOR: '' } : {}) };
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uSurfaceBaseY = { value: baseY };
+    shader.uniforms.uSurfaceWallHeight = { value: wallHeight };
     shader.vertexShader = shader.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vSurfaceWorld;\nvarying vec3 vSurfaceNormal;')
       .replace('#include <project_vertex>', '#include <project_vertex>\nvSurfaceWorld = (modelMatrix * vec4(transformed, 1.0)).xyz;\nvSurfaceNormal = normalize(mat3(modelMatrix) * objectNormal);');
