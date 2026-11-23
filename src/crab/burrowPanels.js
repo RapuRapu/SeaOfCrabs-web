@@ -503,7 +503,7 @@ export function createProcessPanel(root, { view, inventory, labelOf, onLoad, onC
   };
 }
 
-export function createBoardPanel(root, { orders, materialOptions, boxOptions, amounts, onAdd, onMove, onRemove, onClose }) {
+export function createBoardPanel(root, { orders, materialOptions, boxOptions, amounts, onAdd, onMove, onRemove, onMoveStructure, onDismantleStructure, onClose }) {
   const shell = createPanelShell(root, 'board-panel', 'Job board', onClose);
   let draft = { material: null, toId: null, amount: 10 };
 
@@ -542,6 +542,7 @@ export function createBoardPanel(root, { orders, materialOptions, boxOptions, am
     add.dataset.addOrder = '1';
     add.disabled = !draft.material || draft.toId === null;
     add.addEventListener('click', () => onAdd(draft.material, draft.toId, draft.amount));
+    renderStructureActions(shell.body, { label: 'burrow heart', onMove: onMoveStructure, onDismantle: onDismantleStructure });
   }
 
   return {
@@ -554,5 +555,33 @@ export function createBoardPanel(root, { orders, materialOptions, boxOptions, am
     },
     close: () => shell.hide(),
     render,
+  };
+}
+
+export function createBedPanel(root, { onSleep, onMove, onDismantle, onClose }) {
+  const shell = createPanelShell(root, 'bed-panel', 'Crab bed', onClose);
+  let currentStation = null;
+
+  function render() {
+    shell.body.replaceChildren();
+    element('div', 'summary', shell.body, 'Sleep to heal fast. Wake up rested: faster healing and +10% speed for 15 min.');
+    const row = element('div', 'item', shell.body);
+    element('div', 'item-name', element('div', 'item-text', row), 'Sleep');
+    const sleep = element('button', 'item-action', row, 'Sleep');
+    sleep.dataset.sleep = '1';
+    sleep.addEventListener('click', () => onSleep(currentStation));
+    renderStructureActions(shell.body, { label: 'crab bed', onMove: () => onMove(currentStation), onDismantle: () => onDismantle(currentStation) });
+  }
+
+  return {
+    get isOpen() {
+      return shell.isOpen;
+    },
+    open(station) {
+      currentStation = station;
+      render();
+      shell.show();
+    },
+    close: () => shell.hide(),
   };
 }

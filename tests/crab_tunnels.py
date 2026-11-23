@@ -64,7 +64,11 @@ FLOW = r'''
   out.bedBuilt = d.buildStation('crabBed', bedCell.column, bedCell.row);
   d.progression.state.health = 1;
   const bed = d.burrow.state.stations.find((s) => s.kind === 'crabBed');
-  out.sleeping = d.startSleeping(bed);
+  d.openStation(bed);
+  const bedPanel = document.querySelector('#hud .bed-panel');
+  out.bedPanelHasMove = Boolean(bedPanel) && [...bedPanel.querySelectorAll('button')].some((button) => button.textContent === 'Move');
+  document.querySelector('[data-sleep]').click();
+  out.sleeping = Boolean(d.player.sleeping);
   out.sleepSeconds = +step(20, () => !d.player.sleeping).toFixed(1);
   out.fullAfterSleep = d.progression.state.health === d.progression.maxHealth();
   out.rested = d.isRested();
@@ -114,7 +118,7 @@ with sync_playwright() as playwright:
         'exitBuilt': flow['exitBuilt'] and flow['travelPoints'] == 2 and flow['surfaceBlocked'] and flow['target']['keep'] == 5 and flow['keepLocked'] and flow['noLongerWallSpot'],
         'digIsCheap': flow['digMsAverage'] < 60,
         'travelThroughExit': flow['exitOption'] == 'exit' and flow['cameUpAtExit'] and flow['enterOption'] == 'enter' and flow['wentDownAtExit'],
-        'crabBed': flow['bedBuilt'] and flow['sleeping'] and flow['sleepSeconds'] <= 11 and flow['fullAfterSleep'] and flow['rested'],
+        'crabBed': flow['bedBuilt'] and flow['bedPanelHasMove'] and flow['sleeping'] and flow['sleepSeconds'] <= 11 and flow['fullAfterSleep'] and flow['rested'],
         'fillSand': flow['fillRefusesStructure'] and flow['fillableTip'] is None and flow['fillStarted'] and flow['tipFilled'],
         'fogOfWar': flow['fogRevealsAroundCrab'] and 0 < flow['revealedShare'] < 0.6,
         'saved': reloaded == {'exits': 2, 'fogKept': True, 'bed': True, 'rested': True},

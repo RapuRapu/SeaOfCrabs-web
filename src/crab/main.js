@@ -32,7 +32,7 @@ import { random, randomSource } from './random.js';
 import { createAudio } from './audio.js';
 import { createBurrow, loadBurrowModels, createEmptyBurrow, BURROW_LAYER, BURROW_ORIGIN, ENTRANCE_REACH, ENTRANCE_BLOCK_RADIUS, STATION_KINDS, STATION_REACH, SHAFT_CELL, SHAFT_ACCESS_ROW_STEP, BURROW_CELL, cellCenter } from './burrow.js';
 import { createThumbnails } from './thumbnails.js';
-import { createBuildPanel, createStoragePanel, createHelpersPanel, createRackPanel, createProcessPanel, createBoardPanel } from './burrowPanels.js';
+import { createBuildPanel, createStoragePanel, createHelpersPanel, createRackPanel, createProcessPanel, createBoardPanel, createBedPanel } from './burrowPanels.js';
 import { PROCESS_RECIPES, isProcessStation, loadStation, collectStation, tickStations, processView } from './processing.js';
 import { createRack, RACK_BATCH, RACK_DRY_SECONDS, RACK_REACH, RACK_BLOCK_RADIUS, rackInputIn } from './rack.js';
 import { createHelpers, HELPER_LIMIT, helperStats, helperMaxHealth, HELPER_MEAL_SECONDS, SATCHEL_LOAD, SATCHEL_CORD_COST } from './helpers.js';
@@ -546,7 +546,18 @@ const boardPanel = createBoardPanel(hud.root, {
   onRemove: (id) => {
     if (removeBoardOrder(id)) boardPanel.render();
   },
+  onMoveStructure: () => startMovingStructure(burrow.stationOf('burrowHeart')),
+  onDismantleStructure: () => dismantleStructure(burrow.stationOf('burrowHeart')),
   onClose: () => boardPanel.close(),
+});
+const bedPanel = createBedPanel(hud.root, {
+  onSleep: (station) => {
+    bedPanel.close();
+    startSleeping(station);
+  },
+  onMove: (station) => startMovingStructure(station),
+  onDismantle: (station) => dismantleStructure(station),
+  onClose: () => bedPanel.close(),
 });
 const processPanel = createProcessPanel(hud.root, {
   view: processView,
@@ -924,7 +935,7 @@ const statusPanel = createStatusPanel(hud.root, {
 });
 
 function anyPanelOpen() {
-  return mapView.isOpen || statusPanel.isOpen || workbenchPanel.isOpen || moltPanel.isOpen || backpack.isOpen || buildPanel.isOpen || storagePanel.isOpen || helpersPanel.isOpen || rackPanel.isOpen || processPanel.isOpen || boardPanel.isOpen;
+  return mapView.isOpen || statusPanel.isOpen || workbenchPanel.isOpen || moltPanel.isOpen || backpack.isOpen || buildPanel.isOpen || storagePanel.isOpen || helpersPanel.isOpen || rackPanel.isOpen || processPanel.isOpen || boardPanel.isOpen || bedPanel.isOpen;
 }
 
 function closePanels() {
@@ -938,6 +949,7 @@ function closePanels() {
   rackPanel.close();
   processPanel.close();
   boardPanel.close();
+  bedPanel.close();
 }
 
 const destinationMarker = new THREE.Mesh(
@@ -1586,7 +1598,7 @@ function openStation(station) {
   turnToward(Math.atan2(spot.x - player.x, spot.z - player.z), 1);
   if (station.kind === 'workshop') workbenchPanel.open();
   else if (station.kind === 'exit') hud.bumpTravel();
-  else if (station.kind === 'crabBed') startSleeping(station);
+  else if (station.kind === 'crabBed') bedPanel.open(station);
   else if (station.kind === 'helperNest' || station.kind === 'pantry') storagePanel.open(station.box, { station, title: stationName(station) });
   else if (isProcessStation(station)) processPanel.open(station);
   else if (station.kind === 'burrowHeart') boardPanel.open();
@@ -1806,7 +1818,7 @@ const RACK_MOVE_RADIUS = 12;
 const RACK_ENTRANCE_CLEARANCE = 3;
 
 function closeStructurePanels() {
-  for (const panel of [workbenchPanel, storagePanel, rackPanel, processPanel]) if (panel.isOpen) panel.close();
+  for (const panel of [workbenchPanel, storagePanel, rackPanel, processPanel, boardPanel, bedPanel]) if (panel.isOpen) panel.close();
 }
 
 function startMovingStructure(target) {
