@@ -787,13 +787,15 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   function fillProblem(column, row, occupiedCells = []) {
     if (!isDug(column, row)) return 'notDug';
     if (stationAt(column, row)) return 'structure';
-    if (column === SHAFT_CELL.column && (row === SHAFT_CELL.row || row === SHAFT_CELL.row - 1)) return 'shaft';
+    if (!state.entranceClosed && column === SHAFT_CELL.column && (row === SHAFT_CELL.row || row === SHAFT_CELL.row - 1)) return 'shaft';
     if (state.stations.some((station) => station.access && station.access.column === column && station.access.row === row)) return 'exitAccess';
     if (occupiedCells.some((cell) => cell.column === column && cell.row === row)) return 'occupied';
     if (!besideSand(column, row)) return 'notBesideSand';
     const removed = cellIndex(column, row);
-    const reached = new Set([cellIndex(SHAFT_CELL.column, SHAFT_CELL.row)]);
-    const queue = [[SHAFT_CELL.column, SHAFT_CELL.row]];
+    const start = connectivityStart(removed);
+    if (!start) return 'cutsOff';
+    const reached = new Set([cellIndex(start.column, start.row)]);
+    const queue = [[start.column, start.row]];
     while (queue.length) {
       const [currentColumn, currentRow] = queue.pop();
       for (const [stepColumn, stepRow] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -807,6 +809,11 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     }
     if (state.stations.some((station) => !reached.has(cellIndex(station.column, station.row)))) return 'cutsOff';
     return null;
+  }
+
+  function connectivityStart(removed) {
+    const anchors = [...(state.entranceClosed ? [] : [SHAFT_CELL]), ...state.stations.filter((station) => station.kind === 'exit').map((station) => station.access)];
+    return anchors.find((cell) => cell && cellIndex(cell.column, cell.row) !== removed && isDug(cell.column, cell.row)) || null;
   }
 
   function besideSand(column, row) {
