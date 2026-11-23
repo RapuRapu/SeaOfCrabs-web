@@ -1103,7 +1103,8 @@ function buildStation(kind, column, row, { free = false } = {}) {
 function buildRackStation() {
   const definition = STATION_KINDS.dryingRack;
   if (rack.exists || !burrow.exists || !canAfford(definition.cost, save.inventory)) return false;
-  const built = rack.build(burrow.state.entrance);
+  const doorway = nearestDoorway(player.x, player.z);
+  const built = doorway && rack.build(doorway);
   if (!built) {
     hud.log('notice', 'No room beside the entrance for a drying rack');
     return false;
@@ -1181,7 +1182,8 @@ function chooseStation(kind) {
 }
 
 const BOSS_EXIT_CLEARANCE = 24;
-const EXIT_PICK_DISTANCE = 2.4;
+const EXIT_PICK_PIXELS = 44;
+const exitMarkerProbe = new THREE.Vector3();
 const EXIT_SPACING = 7;
 
 function exitCellProblem(column, row) {
@@ -1677,10 +1679,14 @@ function moveStationTo(column, row) {
   return true;
 }
 
+function nearestDoorway(x, z) {
+  return burrow.travelPoints().map((point) => point.surface).reduce((best, surface) => (!best || Math.hypot(surface.x - x, surface.z - z) < Math.hypot(best.x - x, best.z - z) ? surface : best), null);
+}
+
 function rackSpotProblem(x, z) {
-  const entrance = burrow.state.entrance;
-  if (Math.hypot(x - entrance.x, z - entrance.z) > RACK_MOVE_RADIUS) return 'far';
-  if (Math.hypot(x - entrance.x, z - entrance.z) < RACK_ENTRANCE_CLEARANCE) return 'blocked';
+  const doorways = burrow.travelPoints().map((point) => point.surface);
+  if (!doorways.some((doorway) => Math.hypot(x - doorway.x, z - doorway.z) <= RACK_MOVE_RADIUS)) return 'far';
+  if (doorways.some((doorway) => Math.hypot(x - doorway.x, z - doorway.z) < RACK_ENTRANCE_CLEARANCE)) return 'blocked';
   if (world.heightAt(x, z) < TIDE_MIDDLE + TIDE_AMPLITUDE || world.retained.levelAt(x, z) > world.heightAt(x, z) - 0.05) return 'wet';
   for (let around = -1; around < 8; around++) {
     const reach = around < 0 ? 0 : 1.8;
@@ -1695,7 +1701,7 @@ function moveRackTo(x, z) {
   showSpotFeedback(x, z, !problem);
   if (problem) {
     rackBlockedCells = world.blockCircle(rack.state.x, rack.state.z, RACK_BLOCK_RADIUS);
-    hud.log('notice', { far: 'Keep the rack near your burrow entrance', wet: 'Too wet here — the kelp would never dry', blocked: 'No room here — pick open sand' }[problem]);
+    hud.log('notice', { far: 'Keep the rack near a burrow entrance or exit', wet: 'Too wet here — the kelp would never dry', blocked: 'No room here — pick open sand' }[problem]);
     return false;
   }
   rack.moveTo(x, z);
@@ -2678,9 +2684,10 @@ function handleBurrowTap(clientX, clientY, isNewTouch) {
   if (placement.station === 'exit') {
     if (!isNewTouch) return;
     const floor = burrow.pointOnFloor(clientX, clientY, camera, raycaster);
-    const spot = floor && placement.exitSpots.reduce((best, candidate) => {
-      const distance = Math.hypot(candidate.marker.x - floor.x, candidate.marker.z - floor.z);
-      return distance < EXIT_PICK_DISTANCE && (!best || distance < best.distance) ? { candidate, distance } : best;
+    const spot = placement.exitSpots.reduce((best, candidate) => {
+      exitMarkerProbe.set(candidate.marker.x, BURROW_ORIGIN.y + 0.18, candidate.marker.z).project(camera);
+      const distance = Math.hypot((exitMarkerProbe.x * 0.5 + 0.5) * innerWidth - clientX, (-exitMarkerProbe.y * 0.5 + 0.5) * innerHeight - clientY);
+      return distance < EXIT_PICK_PIXELS && (!best || distance < best.distance) ? { candidate, distance } : best;
     }, null);
     if (spot && buildStation('exit', spot.candidate.column, spot.candidate.row, { free: Boolean(placement.relocatingExit) })) {
       placement.relocatingExit = null;
@@ -3161,7 +3168,7 @@ if (isScreenshotMode) {
 window.__debug = {
   hud, setShowPerformance, surfacePointAbovePlayer, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
   tracks, ripples, hermit, gear, hitPlayer, strike, workshop, workbenchPanel, salvageItem, startMovingStructure, dismantleStructure, removeTravelPoint, startMovingExit, handleTravelAction, travelActions, moveStationTo, moveRackTo, isRecipeDiscovered, placement, cancelPlacement, backpack, openBackpack, buildWorkshop, craftItem, wearItem, unequipItem, walkToWorkshop, setDestination, setPaused, handleTap, renderScene, updateCamera, seaLevelAt,
-  audio, isAudioUnlocked: () => audioUnlocked, progression, statusPanel, difficultyOf, experienceForKill, enemies, remains, engage, die, recoverRemains, playerStats, randomSource, upgradeTools, refineItem, modifyItem, startMolt, finishMolt, isMolting, isSoft, moltPanel, rack, rackPanel, buildRackStation, eatKelp, useConsumable, craftSupply, assignQuickSlot, quickSlots, isWellFed, walkToRack, helpers, helpersPanel, equipHelper, openMap, startFillMode, startFillCell, startSleeping, wakeUp, isRested, mapView, fog, exitCellProblem, chooseStation, nearestTravelPoint, rescueHelperAt, walkToStranded, burrow, storage, storagePanel, buildPanel, enterBurrow, exitBurrow, travel, travelOption, walkToShaft, cameraDistanceFor, getCameraDistance: () => cameraDistance, digEntranceAt, chooseEntranceSpot, startEntrancePlacement, buildStation, stationBuildProblem, burrowStage, startDigCell, previewEntranceSpot, walkToEntrance, walkToStation, isUnderground: () => underground, entranceSpotProblem, wakeSpot, persist, startOver,
+  audio, isAudioUnlocked: () => audioUnlocked, progression, statusPanel, difficultyOf, experienceForKill, enemies, remains, engage, die, recoverRemains, playerStats, randomSource, upgradeTools, refineItem, modifyItem, startMolt, finishMolt, isMolting, isSoft, moltPanel, rack, rackPanel, buildRackStation, eatKelp, useConsumable, craftSupply, assignQuickSlot, quickSlots, isWellFed, walkToRack, helpers, helpersPanel, equipHelper, openMap, startFillMode, startFillCell, startSleeping, wakeUp, isRested, mapView, fog, exitCellProblem, chooseStation, nearestTravelPoint, rescueHelperAt, walkToStranded, burrow, storage, storagePanel, buildPanel, enterBurrow, exitBurrow, travel, travelOption, walkToShaft, cameraDistanceFor, getCameraDistance: () => cameraDistance, digEntranceAt, chooseEntranceSpot, startEntrancePlacement, buildStation, stationBuildProblem, burrowStage, rackSpotProblem, startDigCell, previewEntranceSpot, walkToEntrance, walkToStation, isUnderground: () => underground, entranceSpotProblem, wakeSpot, persist, startOver,
   setCameraDistance: (distance) => { cameraDistance = distance; },
   setRendering: (enabled) => { rendersFrames = enabled; },
   isPaused: () => paused,

@@ -41,6 +41,8 @@ FLOW = r'''
   out.anchorKept = d.burrow.state.entrance.x === entranceBefore.x && d.burrow.state.entrance.z === entranceBefore.z;
   out.exitSurfaceSame = Math.hypot(exitPoint().station.surface.x - surface.x, exitPoint().station.surface.z - surface.z) < 1e-6;
   out.closedSaved = d.save.burrow.entranceClosed === true;
+  const exitSurface = exitPoint().station.surface;
+  out.rackAllowedNearExit = d.rackSpotProblem(exitSurface.x + 5, exitSurface.z) !== 'far' && d.rackSpotProblem(entranceBefore.x + 5, entranceBefore.z) === 'far';
   out.lastRouteKept = d.removeTravelPoint(exitPoint()) === false && d.burrow.travelPoints().length === 1;
 
   d.enterBurrow(exitPoint());
