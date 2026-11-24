@@ -7,7 +7,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { applySeaside } from './seaside.js';
 import { random } from './random.js';
 import { difficultyOf } from './progression.js';
-import { creatureAssetAvailable, createCreature, OCTOPUS_SHELL_SPOT } from './creatureAssets.js';
+import { creatureAssetAvailable, createCreature } from './creatureAssets.js';
 import { buildCockroachGeometry, buildCookLegGeometry, buildCleaverGeometry, LINE_TELEGRAPH_FRAGMENT_GLSL, buildRatGeometry, buildCatGeometry, buildMorayGeometry, buildOctopusGeometry, buildMantisGeometry, buildLobsterBodyGeometry, buildLobsterClawGeometry, TELEGRAPH_VERTEX_GLSL, TELEGRAPH_FRAGMENT_GLSL, INK_FRAGMENT_GLSL } from './reefCreatures.js';
 
 export const PLAYER_BODY_RADIUS = 0.9;
@@ -29,7 +29,7 @@ export const ENEMY_KINDS = {
   shipCat: { label: "Ship's cat", level: 11, health: 1300, attack: 36, defense: 12, attackInterval: 2.4, windup: 1.0, speed: 4.2, radius: 2.9, temperament: 'aggressive', sightRange: 0, telegraph: { reach: 3.8, radius: 3.0, pounceEvery: 3, pounceRange: 16, pounceRadius: 3.4, pounceWindup: 1.5 }, experience: 1500, pearlChance: 1, pearlCount: 3, respawnSeconds: MINIBOSS_RESPAWN_SECONDS, barHeight: 7.5, boss: true, camp: true },
   cockroach: { label: 'Cockroach', level: 9, drops: ['wax', 'fishBone'], health: 90, attack: 26, defense: 10, attackInterval: 1.0, windup: 0.25, speed: 7.5, radius: 1.1, bodyReach: 2.2, temperament: 'aggressive', sightRange: 9, experience: 160, pearlChance: 0.1, respawnSeconds: 100, barHeight: 2.4, hold: true },
   cook: { label: 'The Cook', level: 13, health: 1550, attack: 48, defense: 16, attackInterval: 2.6, windup: 1.3, speed: 4.3, radius: 3.6, temperament: 'aggressive', sightRange: 0, nerves: true, flees: true, telegraph: { shape: 'line', lineLength: 24, lineWidth: 3.6, lineRange: 15, stompEvery: 3, stompRadius: 7.5, stompWindup: 1.1 }, experience: 2000, pearlChance: 1, pearlCount: 4, respawnSeconds: 480, barHeight: 13, boss: true, hold: true, dailyBoss: true },
-  rivalHermit: { label: 'Rival hermit crab', level: 4, drops: ['shellBits', 'driftwood'], health: 70, attack: 9, defense: 4, attackInterval: 1.4, windup: 0.5, speed: 5.0, radius: 0.95, temperament: 'aggressive', sightRange: 8, experience: 50, pearlChance: 0.15, respawnSeconds: 120, barHeight: 2.6, ownShell: 'cone' },
+  rivalHermit: { label: 'Rival hermit crab', level: 4, drops: ['shellBits', 'driftwood'], health: 70, attack: 9, defense: 4, attackInterval: 1.4, windup: 0.5, speed: 5.0, radius: 1.25, bodyReach: 1.8, temperament: 'aggressive', sightRange: 8, experience: 50, pearlChance: 0.15, respawnSeconds: 120, barHeight: 3.9, ownShell: 'cone' },
   giantLobster: { label: 'Giant lobster', level: 11, health: 1040, attack: 30, defense: 8, attackInterval: 2.6, windup: 1.2, speed: 3.2, radius: 3.0, temperament: 'aggressive', sightRange: 0, telegraph: { reach: 4.4, radius: 3.0 }, experience: 800, pearlChance: 1, pearlCount: 2, respawnSeconds: MINIBOSS_RESPAWN_SECONDS, barHeight: 7.5, boss: true, reef: true },
 };
 
@@ -87,13 +87,16 @@ const RIVAL_CULL_RADIUS = 4;
 const RIVAL_WEAPON_SCALE = 1.5;
 const LOOTER_LABEL_LIFT = 1.35;
 const LOOT_SHELL_BRIGHTNESS = 1.35;
-const LOOT_WEAPON_LIFT_BY_KIND = { giantLobster: 0.2 };
+const LOOT_WEAPON_LIFT_BY_KIND = { giantLobster: 1.0, shoreCrab: 0.4 };
+const LOOT_WEAPON_SPLAY_BY_KIND = { shoreCrab: 1.8 };
 const RIVAL_HERMIT_TINT = [0.45, 0.6, 1.0];
 const RIVAL_GROUND = new THREE.Vector3(0, 1, 0);
-const LOOT_WEAPON_SCALE = { shoreCrab: 1.2, giantLobster: 0.9 };
-const LOOT_WEAPON_SPLAY = 0.5;
+const LOOT_WEAPON_SCALE = { shoreCrab: 1.0, giantLobster: 0.9 };
+const LOOT_GRIP_ALONG_JAW = { giantLobster: 0.6 };
+const DEFAULT_GRIP_ALONG_JAW = 0.55;
+const LOOT_WEAPON_SPLAY = 0.6;
 const LOOT_WEAPON_LIFT = 0.15;
-const LOOT_SHELL_FIT = { octopus: { size: 0.18, position: OCTOPUS_SHELL_SPOT, rotation: [0.2, 0.9, 1.1] } };
+const LOOT_SHELL_FIT = { octopus: { size: 0.19, rotation: [0.3, 2.6, 1.4] } };
 
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 
@@ -1035,6 +1038,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     }
     for (const part of enemy.lootParts || []) part.removeFromParent();
     enemy.lootParts = [];
+    const gripSides = [];
     if (!enemy.creature) return;
     for (const which of ['big', 'small']) {
       const item = loot[which];
@@ -1044,26 +1048,31 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       const holder = new THREE.Group();
       holder.userData.hand = hand;
       holder.add(weapon);
-      holder.updateMatrixWorld(true);
-      const reachDirection = new THREE.Box3().setFromObject(weapon).getCenter(new THREE.Vector3()).normalize();
-      const lift = LOOT_WEAPON_LIFT_BY_KIND[enemy.kind] ?? LOOT_WEAPON_LIFT;
-      holder.userData.pointing = new THREE.Quaternion().setFromUnitVectors(reachDirection, new THREE.Vector3(hand.side * LOOT_WEAPON_SPLAY, lift, 1).normalize());
+      holder.userData.lift = LOOT_WEAPON_LIFT_BY_KIND[enemy.kind] ?? LOOT_WEAPON_LIFT;
+      gripSides.push(hand.side);
       scene.add(holder);
       enemy.lootParts.push(holder);
     }
+    if (enemy.creature.setGripSides) enemy.creature.setGripSides(gripSides);
     const fit = LOOT_SHELL_FIT[enemy.kind];
     if (loot.shell && fit && shellModelAvailable(SHELLS[loot.shell.kind].look.model)) {
       const model = SHELLS[loot.shell.kind].look.model;
       const shell = buildShellModel(model, lootMaterial('shell', model));
       shell.scale.setScalar(fit.size * enemy.creature.length);
-      shell.position.set(fit.position[0] * enemy.creature.length, fit.position[1] * enemy.creature.height, fit.position[2] * enemy.creature.length);
       shell.rotation.set(...fit.rotation);
-      enemy.creature.object.add(shell);
+      (enemy.creature.shellAnchor || enemy.creature.object).add(shell);
       enemy.lootParts.push(shell);
     }
   }
 
   const handWorld = new THREE.Vector3();
+  const jawBase = new THREE.Vector3();
+  const jawTip = new THREE.Vector3();
+  const clawAxis = new THREE.Vector3();
+  const clawSide = new THREE.Vector3();
+  const clawFace = new THREE.Vector3();
+  const clawBasis = new THREE.Matrix4();
+  const WORLD_UP = new THREE.Vector3(0, 1, 0);
   const bodyTurn = new THREE.Quaternion();
   function holdLootWeapons(enemy) {
     if (!enemy.creature || !enemy.lootParts || !enemy.lootParts.length) return;
@@ -1071,13 +1080,20 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     object.updateMatrixWorld(true);
     object.getWorldQuaternion(bodyTurn);
     for (const part of enemy.lootParts) {
-      const { hand, pointing } = part.userData;
+      const { hand, lift } = part.userData;
       if (!hand) continue;
       part.visible = object.visible;
       part.position.set(0, 0, 0);
-      for (const gripBone of hand.gripBones) part.position.add(gripBone.getWorldPosition(handWorld));
-      part.position.divideScalar(hand.gripBones.length);
-      part.quaternion.copy(bodyTurn).multiply(pointing);
+      for (const jaw of hand.jaws) {
+        jaw.base.getWorldPosition(jawBase);
+        jaw.tip.getWorldPosition(jawTip);
+        part.position.add(handWorld.copy(jawBase).lerp(jawTip, LOOT_GRIP_ALONG_JAW[enemy.kind] ?? DEFAULT_GRIP_ALONG_JAW));
+      }
+      part.position.divideScalar(hand.jaws.length);
+      clawAxis.set(hand.side * (LOOT_WEAPON_SPLAY_BY_KIND[enemy.kind] ?? LOOT_WEAPON_SPLAY), lift, 1).normalize().applyQuaternion(bodyTurn);
+      clawSide.crossVectors(clawAxis, WORLD_UP).normalize();
+      clawFace.crossVectors(clawSide, clawAxis);
+      part.quaternion.setFromRotationMatrix(clawBasis.makeBasis(clawSide, clawAxis, clawFace));
       part.scale.setScalar(object.scale.x);
     }
   }

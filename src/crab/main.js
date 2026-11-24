@@ -260,12 +260,15 @@ const POSES = {
   73: { x: 24, z: -27, distance: 12, tideShare: 0.56, heading: 1.75, outfit: { shell: 'whelk', claws: 'coralTipped', quality: 'fine' } },
   30: { x: 15, z: -20, distance: 22, tideShare: 0.56, heading: 0.9, workshop: true, naked: true, backpack: true, remainsAt: { x: -20, z: -40 } },
   24: { x: -1, z: -6, distance: 16, tideShare: 0.75, heading: 0.4, enemy: { kind: 'shoreCrab', offsetX: -2.8, offsetZ: 0.6 }, fightSeconds: 3.2 },
-  122: { x: 15, z: -20, distance: 18, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 2.6, offsetZ: 1.6 } },
-  123: { x: 15, z: -20, distance: 12, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 2.6, offsetZ: 1.6, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } } },
+  122: { x: 15, z: -20, distance: 18, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 2.6, offsetZ: -0.6 } },
+  123: { x: 15, z: -20, distance: 12, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 2.6, offsetZ: -0.6, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } } },
   124: { x: -1, z: -6, distance: 12, tideShare: 0.75, heading: 0.4, level: 9, enemy: { kind: 'shoreCrab', offsetX: -3.2, offsetZ: 1.2, loot: { big: 'coralTipped', small: 'shellEdged' } } },
   125: { x: 10, z: 80, distance: 18, tideShare: 0.75, heading: 0.4, level: 8, revealAround: 60, enemy: { kind: 'octopus', offsetX: 2.5, offsetZ: 2.5, loot: { shell: 'turban' } } },
   126: { x: -60, z: 91, distance: 28, tideShare: 0.75, heading: 0.2, level: 10, outfit: { shell: 'coral', claws: 'coralTipped', quality: 'fine' }, revealAround: 60, enemy: { kind: 'giantLobster', offsetX: -2, offsetZ: 6.5, loot: { big: 'cleaver' } } },
   128: { x: -1, z: -6, distance: 6, tideShare: 0.75, heading: 0.4, level: 9, enemy: { kind: 'shoreCrab', offsetX: -1.8, offsetZ: 0.4, loot: { big: 'coralTipped', small: 'shellEdged' } } },
+  129: { x: -60, z: 91, distance: 16, tideShare: 0.75, heading: 0.2, level: 10, revealAround: 60, outfit: { shell: 'coral', claws: 'coralTipped', quality: 'fine' }, enemy: { kind: 'giantLobster', offsetX: -1, offsetZ: 5, loot: { big: 'cleaver' } } },
+  130: { x: 10, z: 80, distance: 9, tideShare: 0.75, heading: 0.4, level: 8, revealAround: 60, enemy: { kind: 'octopus', offsetX: 2.2, offsetZ: 2.2, loot: { shell: 'turban' } } },
+  131: { x: 15, z: -20, distance: 6, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 1.2, offsetZ: -1.8, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } } },
   127: { x: 15, z: -20, distance: 10, tideShare: 0.56, heading: 0.9, level: 6, enemy: { kind: 'rivalHermit', offsetX: 2.6, offsetZ: 1.6, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } }, fightSeconds: 1.2, moment: 'strike' },
   25: { x: 30, z: -40, distance: 13, tideShare: 0.56, heading: 0.5, enemy: { kind: 'sandHopper', offsetX: 1.4, offsetZ: 2.6 }, fightSeconds: 0 },
   26: { x: 0, z: -104, distance: 40, tideShare: 0.56, heading: 3.2, level: 6, enemy: { kind: 'gull', offsetX: -2, offsetZ: -5.5 }, fightSeconds: 3.4 },
@@ -2087,7 +2090,7 @@ function rollDamageDetailed(attack, defense) {
 
 const rollDamage = (attack, defense) => rollDamageDetailed(attack, defense).damage;
 const roundedText = (value) => String(Math.round(value * 10) / 10);
-const rollText = (spread) => `roll ${Math.round(spread * 100)} %`;
+const rollText = (spread) => `${Math.round(spread * 100)} %`;
 
 const HANDS_HOLDING_SHIELD = () => ['big', 'small'].map((hand) => gear.heldIn(hand)).filter((item) => item && CLAWS[item.kind].shield);
 
@@ -2137,8 +2140,8 @@ function strike(enemy) {
   const hand = stats.strikingHands[player.hitCount % stats.strikingHands.length];
   const roll = rollDamageDetailed(stats.handAttack[hand], pierces ? 0 : defenseOf(enemy));
   const damage = roll.damage * (isSting ? 2 : 1);
-  const armourText = pierces ? 'armour pierced' : `its armour ${defenseOf(enemy)} blocks ${roundedText(roll.blocked)}`;
-  hud.log('combat', `You hit ${enemy.definition.label} for ${damage} — ${stats.strikingHands.length > 1 ? `${HAND_LABELS[hand].toLowerCase()}, ` : ''}attack ${stats.handAttack[hand]}, ${armourText}, ${rollText(roll.spread)}${isSting ? ', sting ×2' : ''}`);
+  const armourText = pierces ? 'armour pierced' : `armour ${defenseOf(enemy)} −${roundedText(roll.blocked)}`;
+  hud.log('combat', `You hit ${enemy.definition.label} for ${damage} (${stats.strikingHands.length > 1 ? `${HAND_LABELS[hand].toLowerCase()} ` : ''}atk ${stats.handAttack[hand]}, ${armourText}, ${rollText(roll.spread)}${isSting ? ', sting ×2' : ''})`);
   player.lastCombatTime = simulationTime;
   floatAt(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight * 0.7, enemy.z, isSting ? `${damage}!` : String(damage), isSting ? 'sting' : 'dealt');
   hermit.playAttack(isSting ? 'both' : hand);
@@ -2184,7 +2187,7 @@ function hitPlayer(enemy) {
   }
   progression.state.health -= damage;
   player.lastHitBy = enemy;
-  hud.log('combat', `${enemy.definition.label} hits you for ${damage} — attack ${attackOf(enemy)}, your armour ${stats.defense} blocks ${roundedText(roll.blocked)} [${armourParts()}], ${rollText(roll.spread)}${modifiers.length ? `, ${modifiers.join(', ')}` : ''} · ${healthText()}`);
+  hud.log('combat', `${enemy.definition.label} hits you for ${damage} (atk ${attackOf(enemy)}, armour ${stats.defense} −${roundedText(roll.blocked)} [${armourParts()}], ${rollText(roll.spread)}${modifiers.length ? `, ${modifiers.join(', ')}` : ''}) · ${healthText()}`);
   player.lastCombatTime = simulationTime;
   floatAt(player.x, player.y + 2.4, player.z, `−${damage}`, 'taken');
   hud.flashHurt();

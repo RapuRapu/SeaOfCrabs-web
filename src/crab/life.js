@@ -8,6 +8,9 @@ const SEAWEED_COLORS = [linearColor(0.2, 0.42, 0.14), linearColor(0.34, 0.5, 0.1
 const GRASS_COLORS = [linearColor(0.62, 0.68, 0.34), linearColor(0.74, 0.72, 0.4), linearColor(0.5, 0.6, 0.3)];
 const BLADE_SEGMENTS = 6;
 
+const FLOATING_LEAF_LIFT = 0.015;
+const FLOATING_LEAF_SHADE = 0.55;
+
 const BLADE_DECLARATIONS_GLSL = /* glsl */ `
 attribute vec3 aRoot;
 attribute vec4 aBlade;
@@ -41,11 +44,14 @@ const bladeMotion = (floats) => ({
     transformed = aRoot + vec3(cos(aBlade.z) * bladeSide + sway.x + lean.x, bladeAlong * bladeLength * ${floats ? '1.0' : '0.92'}, sin(aBlade.z) * bladeSide + sway.y + lean.y);
     ${CRAB_PUSH_GLSL}
     ${floats ? `
-    float bladeSurface = max(uSeaLevel, texture2D(uRetained, transformed.xz / uWorldSize + 0.5).r) - 0.07;
+    float bladeSurface = max(uSeaLevel, texture2D(uRetained, transformed.xz / uWorldSize + 0.5).r) + ${FLOATING_LEAF_LIFT.toFixed(3)};
     float bladeExcess = transformed.y - bladeSurface;
     if (bladeExcess > 0.0) {
       transformed.y = max(aRoot.y + 0.05, bladeSurface) + bladeExcess * 0.03;
       transformed.xz += normalize(sway + lean + vec2(0.31, 0.17)) * bladeExcess * 0.85;
+      float floatingShare = smoothstep(0.0, 0.15, bladeExcess);
+      vNormal = normalize(mix(vNormal, normalMatrix * vec3(0.0, 1.0, 0.0), floatingShare));
+      vColor.rgb *= mix(1.0, ${FLOATING_LEAF_SHADE.toFixed(2)}, floatingShare);
     }` : ''}
   `,
 });

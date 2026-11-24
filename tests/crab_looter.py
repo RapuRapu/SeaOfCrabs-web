@@ -66,7 +66,7 @@ FLOW = r'''
   const before = d.progression.state.health;
   d.randomSource.next = () => 0.5;
   d.hitPlayer(rival);
-  out.hitUsesLootAttack = logTexts().at(-1).includes(`attack ${d.looting.attackOf(rival)},`);
+  out.hitUsesLootAttack = logTexts().at(-1).includes(`atk ${d.looting.attackOf(rival)},`);
   d.randomSource.next = Math.random;
   out.hitTook = before - d.progression.state.health;
 

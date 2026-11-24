@@ -1,5 +1,5 @@
 export const LOG_LIMIT = 50;
-const COLLAPSED_LINES = 4;
+const COLLAPSED_LINES = 3;
 export const LOG_KINDS = ['combat', 'helperCombat', 'loot', 'build', 'progress', 'helper', 'discovery', 'notice', 'chat', 'system'];
 const KIND_LABELS = { helperCombat: 'helper combat' };
 const commandNameOf = (kind) => (KIND_LABELS[kind] || kind).replace(' ', '-');

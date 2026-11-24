@@ -26,8 +26,11 @@ const MORAY_HEAD_LOWER = -0.35;
 const MANTIS_CROUCH = 0.8;
 const TINTED_KINDS = { moray: [2, 2, 2], octopus: [0.6, 0.62, 0.9] };
 const OCTOPUS_ARM_CURL = 0.8;
-const OCTOPUS_HOLD_CURL = [1.1, 1.3, 1.4];
-export const OCTOPUS_SHELL_SPOT = [0.16, 0.22, 0.02];
+const OCTOPUS_HOLD_CURL = [0.15, 0.45, 0.6];
+const OCTOPUS_SHELL_BONE = 1;
+const FINGER_GRIP_REST = { giantLobster: -0.3 };
+const HOLDING_ARM_RAISE = 0.35;
+const HOLDING_ARM_SPREAD = -0.6;
 
 export async function loadCreatureAssets() {
   const [entries] = await Promise.all([Promise.all(Object.entries(CREATURE_BYTES).map(async ([kind, bytes]) => [kind, (await parseModel(bytes)).scene])), loadCookAsset()]);
@@ -62,6 +65,115 @@ function classifyLimbs(model, bones, kind) {
   return { ...limbs, height };
 }
 
+const SMOOTH_SHADED_KINDS = new Set(['giantLobster']);
+const NORMAL_MAP_STRENGTH = { giantLobster: 0 };
+const NORMAL_WELD_PRECISION = 1e4;
+
+const PHONG_SHAPE = 0.75;
+const tessellatedBySource = new WeakMap();
+
+function phongTessellate(source) {
+  const geometry = source.index ? source.toNonIndexed() : source.clone();
+  smoothSharedNormals(geometry);
+  const names = Object.keys(geometry.attributes);
+  const input = Object.fromEntries(names.map((name) => [name, geometry.attributes[name]]));
+  const triangleCount = input.position.count / 3;
+  const output = Object.fromEntries(names.map((name) => [name, new (name === 'skinIndex' ? Uint16Array : Float32Array)(triangleCount * 12 * input[name].itemSize)]));
+  const corner = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  const cornerNormal = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+  const flat = new THREE.Vector3();
+  const projected = new THREE.Vector3();
+  const project = (point, onto, normal) => projected.copy(point).sub(onto).projectOnVector(normal).negate().add(point);
+  let first = 0;
+  const weightsAt = (barycentric) => {
+    const blended = new Map();
+    barycentric.forEach((share, cornerIndex) => {
+      if (!share) return;
+      for (let slot = 0; slot < 4; slot++) {
+        const joint = input.skinIndex.getComponent(first + cornerIndex, slot);
+        const weight = input.skinWeight.getComponent(first + cornerIndex, slot) * share;
+        if (weight) blended.set(joint, (blended.get(joint) || 0) + weight);
+      }
+    });
+    const strongest = [...blended].sort((a, b) => b[1] - a[1]).slice(0, 4);
+    const total = strongest.reduce((sum, [, weight]) => sum + weight, 0) || 1;
+    return { joints: [0, 1, 2, 3].map((slot) => (strongest[slot] ? strongest[slot][0] : 0)), weights: [0, 1, 2, 3].map((slot) => (strongest[slot] ? strongest[slot][1] / total : 0)) };
+  };
+  const SUB_TRIANGLES = [[[1, 0, 0], [0.5, 0.5, 0], [0.5, 0, 0.5]], [[0.5, 0.5, 0], [0, 1, 0], [0, 0.5, 0.5]], [[0.5, 0, 0.5], [0, 0.5, 0.5], [0, 0, 1]], [[0.5, 0.5, 0], [0, 0.5, 0.5], [0.5, 0, 0.5]]];
+  let written = 0;
+  for (let triangle = 0; triangle < triangleCount; triangle++) {
+    first = triangle * 3;
+    for (let cornerIndex = 0; cornerIndex < 3; cornerIndex++) {
+      corner[cornerIndex].fromBufferAttribute(input.position, first + cornerIndex);
+      cornerNormal[cornerIndex].fromBufferAttribute(input.normal, first + cornerIndex).normalize();
+    }
+    for (const subTriangle of SUB_TRIANGLES) {
+      for (const barycentric of subTriangle) {
+        flat.set(0, 0, 0);
+        const curved = new THREE.Vector3();
+        barycentric.forEach((share, cornerIndex) => {
+          flat.addScaledVector(corner[cornerIndex], share);
+        });
+        barycentric.forEach((share, cornerIndex) => {
+          curved.addScaledVector(project(flat, corner[cornerIndex], cornerNormal[cornerIndex]), share);
+        });
+        flat.lerp(curved, PHONG_SHAPE);
+        const shifted = barycentric.map((share, cornerIndex) => ({ share, index: first + cornerIndex }));
+        const skin = input.skinIndex ? weightsAt(barycentric) : null;
+        for (const name of names) {
+          const attribute = input[name];
+          const size = attribute.itemSize;
+          const target = output[name];
+          if (name === 'position') {
+            target.set([flat.x, flat.y, flat.z], written * 3);
+          } else if (name === 'skinIndex') {
+            target.set(skin.joints, written * 4);
+          } else if (name === 'skinWeight') {
+            target.set(skin.weights, written * 4);
+          } else {
+            for (let component = 0; component < size; component++) {
+              let value = 0;
+              for (const { share, index } of shifted) value += attribute.getComponent(index, component) * share;
+              target[written * size + component] = value;
+            }
+          }
+        }
+        written++;
+      }
+    }
+  }
+  const tessellated = new THREE.BufferGeometry();
+  for (const name of names) tessellated.setAttribute(name, new THREE.BufferAttribute(output[name], input[name].itemSize, false));
+  tessellated.userData.tessellated = true;
+  tessellated.boundingBox = null;
+  tessellated.boundingSphere = null;
+  return tessellated;
+}
+
+function smoothSharedNormals(geometry) {
+  if (geometry.userData.smoothedNormals) return;
+  geometry.userData.smoothedNormals = true;
+  const positions = geometry.attributes.position;
+  const normals = geometry.attributes.normal;
+  const sums = new Map();
+  const keyOf = (index) => `${Math.round(positions.getX(index) * NORMAL_WELD_PRECISION)},${Math.round(positions.getY(index) * NORMAL_WELD_PRECISION)},${Math.round(positions.getZ(index) * NORMAL_WELD_PRECISION)}`;
+  for (let index = 0; index < positions.count; index++) {
+    const key = keyOf(index);
+    const sum = sums.get(key) || [0, 0, 0];
+    sum[0] += normals.getX(index);
+    sum[1] += normals.getY(index);
+    sum[2] += normals.getZ(index);
+    sums.set(key, sum);
+  }
+  const smoothed = new Float32Array(positions.count * 3);
+  const normal = new THREE.Vector3();
+  for (let index = 0; index < positions.count; index++) {
+    normal.fromArray(sums.get(keyOf(index))).normalize();
+    smoothed.set([normal.x, normal.y, normal.z], index * 3);
+  }
+  geometry.setAttribute('normal', new THREE.BufferAttribute(smoothed, 3));
+}
+
 export function createCreature(kind, quality) {
   if (kind === 'cook') return createCook(quality);
   const model = cloneSkinned(loadedCreatures.get(kind));
@@ -75,10 +187,15 @@ export function createCreature(kind, quality) {
       const source = node.material;
       material = applySeaside(new THREE.MeshStandardMaterial(), { chromaticCaustics: quality.chromaticCaustics, wetDarkening: 0.6, wetRoughness: 0.1, cutaway: kind === 'gull' ? 'soft' : false });
       for (const key of ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'roughness', 'metalness']) material[key] = source[key];
-      material.normalScale.copy(source.normalScale);
+      material.normalScale.copy(source.normalScale).multiplyScalar(NORMAL_MAP_STRENGTH[kind] ?? 1);
       material.side = THREE.DoubleSide;
       if (TINTED_KINDS[kind]) material.color.setRGB(...TINTED_KINDS[kind]);
       node.material = material;
+      if (SMOOTH_SHADED_KINDS.has(kind)) {
+        if (!tessellatedBySource.has(node.geometry)) tessellatedBySource.set(node.geometry, phongTessellate(node.geometry));
+        node.geometry = tessellatedBySource.get(node.geometry);
+        smoothSharedNormals(node.geometry);
+      }
       node.castShadow = true;
       node.receiveShadow = true;
       skinnedMeshes.push(node);
@@ -132,15 +249,18 @@ export function createCreature(kind, quality) {
     }
   }
 
-  function poseShoreCrab({ stride, motion, raised, snaps, recoil, fall }) {
+  const fingerPose = (finger, openAmount, gripSides) => finger.joints[0].pose(gripSides && gripSides.includes(finger.side) ? FINGER_GRIP_REST[kind] ?? 0 : openAmount);
+
+  function poseShoreCrab({ stride, motion, raised, snaps, recoil, fall, gripSides }) {
     walk(stride, motion, 0.6, 0.35, fall * 0.9 + recoil * 0.4);
     for (const arm of arms) {
       const snap = arm.side < 0 ? snaps[0] : snaps[1];
-      arm.joints[0].pose(raised * 0.9 - snap * 0.6 + recoil * 0.6, -arm.side * snap * 0.4);
+      const holding = gripSides && gripSides.includes(arm.side);
+      arm.joints[0].pose(raised * 0.9 - snap * 0.6 + recoil * 0.6 + (holding ? HOLDING_ARM_RAISE : 0), -arm.side * (snap * 0.4 + (holding ? HOLDING_ARM_SPREAD : 0)));
       arm.joints[1].pose(raised * 0.5 + snap * 0.5);
       arm.joints[2].pose(0);
     }
-    for (const finger of fingers) finger.joints[0].pose((0.45 * raised - snapsFor(finger, snaps) * 0.45) * 0.8);
+    for (const finger of fingers) fingerPose(finger, (0.45 * raised - snapsFor(finger, snaps) * 0.45) * 0.8, gripSides);
   }
 
   const snapsFor = (limb, snaps) => (limb.side < 0 ? snaps[0] : snaps[1]);
@@ -195,8 +315,8 @@ export function createCreature(kind, quality) {
   }
 
   const octopusArms = limbs.legs.concat(limbs.appendages);
-  const shellSpot = new THREE.Vector3(length * OCTOPUS_SHELL_SPOT[0], limbs.height * OCTOPUS_SHELL_SPOT[1], length * OCTOPUS_SHELL_SPOT[2]);
-  const shellHoldingArm = kind === 'octopus' ? octopusArms.reduce((best, limb) => (limb.tip.distanceTo(shellSpot) < best.tip.distanceTo(shellSpot) ? limb : best), octopusArms[0]) : null;
+  const frontRightScore = (limb) => limb.tip.z + Math.max(0, limb.tip.x) * 0.5;
+  const shellHoldingArm = kind === 'octopus' ? octopusArms.reduce((best, limb) => (frontRightScore(limb) > frontRightScore(best) ? limb : best), octopusArms[0]) : null;
 
   function poseOctopus({ time, motion, lunge, swell, fall, holdingShell = false }) {
     octopusArms.forEach((limb, index) => {
@@ -226,7 +346,7 @@ export function createCreature(kind, quality) {
     if (tail) tail.pose(0, 0, 0.08 * Math.sin(time * 2) - strike * 0.2);
   }
 
-  function poseLobster({ stride, motion, raised, lunge, fall, time }) {
+  function poseLobster({ stride, motion, raised, lunge, fall, time, gripSides }) {
     walk(stride, motion, 0.45, 0.35, fall * 0.8);
     for (const arm of arms) {
       const isAntenna = arm.tip.y > limbs.height * 0.6;
@@ -238,7 +358,7 @@ export function createCreature(kind, quality) {
       arm.joints[1].pose(raised * 0.4 + lunge * 0.5);
       arm.joints[2].pose(lunge * 0.3);
     }
-    for (const finger of fingers) finger.joints[0].pose((0.3 * raised - lunge * 0.4) * 0.8);
+    for (const finger of fingers) fingerPose(finger, (0.3 * raised - lunge * 0.4) * 0.8, gripSides);
     if (tail) tail.pose(0, 0, 0.06 * Math.sin(time * 1.5) + fall * 0.4);
   }
 
@@ -261,10 +381,21 @@ export function createCreature(kind, quality) {
   const grippingArms = fingeredArms.length >= 2 ? fingeredArms.sort((a, b) => a.side - b.side) : singleClaw ? [singleClaw, longestOnSide(-singleClaw.side)].filter(Boolean) : [longestOnSide(-1), longestOnSide(1)].filter(Boolean);
   const handOf = (arm) => {
     const bone = bones[`${arm.name}_3`];
-    const fingerTips = fingers.filter((finger) => bones[`${finger.name}_1`].parent.name.startsWith(`${arm.name}_`)).map((finger) => bones[`${finger.name}_tip`]);
-    return { bone, gripBones: [bones[`${arm.name}_tip`], ...fingerTips], side: arm.side, length: bones[`${arm.name}_tip`].position.length() };
+    const clawFingers = [];
+    const ownsFinger = (finger) => [arm, ...clawFingers].some((owner) => bones[`${finger.name}_1`].parent.name.startsWith(`${owner.name}_`));
+    for (let added = true; added; ) {
+      const next = fingers.find((finger) => !clawFingers.includes(finger) && ownsFinger(finger));
+      added = Boolean(next);
+      if (next) clawFingers.push(next);
+    }
+    const fingerJaws = clawFingers.map((finger) => ({ base: bones[`${finger.name}_1`], tip: bones[`${finger.name}_tip`] }));
+    const jaws = fingerJaws.length >= 2 ? fingerJaws : [{ base: bone, tip: bones[`${arm.name}_tip`] }, ...fingerJaws];
+    return { bone, jaws, side: arm.side, length: bones[`${arm.name}_tip`].position.length() };
   };
   const hands = grippingArms.length >= 2 ? { big: handOf(grippingArms[0]), small: handOf(grippingArms[grippingArms.length - 1]) } : null;
 
-  return { object: model, setFlash, pose: posers[kind], height: limbs.height, length, hands };
+  const shellAnchor = shellHoldingArm ? bones[`${shellHoldingArm.name}_${OCTOPUS_SHELL_BONE}`] : null;
+  let gripSides = [];
+  const pose = (poseArguments) => posers[kind]({ ...poseArguments, gripSides });
+  return { object: model, setFlash, pose, setGripSides: (sides) => { gripSides = sides; }, height: limbs.height, length, hands, shellAnchor };
 }

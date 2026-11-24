@@ -82,8 +82,8 @@ with sync_playwright() as playwright:
     checks = {
         'toastsGone': out['noToastElement'] and out['logVisible'],
         'buildLogged': out['buildLogged'],
-        'damageTakenBreakdown': bool(out['hitYou']) and 'armour' in out['hitYou'] and 'roll' in out['hitYou'] and 'HP ' in out['hitYou'],
-        'damageDealtBreakdown': bool(out['youHit']) and 'attack' in out['youHit'],
+        'damageTakenBreakdown': bool(out['hitYou']) and 'armour' in out['hitYou'] and '%' in out['hitYou'] and 'HP ' in out['hitYou'],
+        'damageDealtBreakdown': bool(out['youHit']) and 'atk ' in out['youHit'],
         'killLogged': bool(out['defeated']),
         'chatEntry': out['chat']['kind'] == 'chat' and out['chat']['author'] == 'You' and out['chat']['text'] == 'hello crabs',
         'commands': out['helpListed'] and out['cleared'] == 0,

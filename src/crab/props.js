@@ -112,7 +112,7 @@ function buildLogGeometry(log) {
 function buildPebbles(world, quality) {
   const random = createRandom(404);
   const wanted = Math.round(1800 * quality.density);
-  const material = applySeaside(new THREE.MeshStandardMaterial({ roughness: 0.8, vertexColors: true }), { wetDarkening: 0.55, wetRoughness: 0.34, chromaticCaustics: quality.chromaticCaustics });
+  const material = applySeaside(new THREE.MeshStandardMaterial({ roughness: 0.8, vertexColors: true }), { surface: 'rock', wetDarkening: 0.55, wetRoughness: 0.34, chromaticCaustics: quality.chromaticCaustics });
   const sizeClasses = [
     { detail: 1, castShadow: false, matrices: [], colors: [] },
     { detail: 2, castShadow: true, matrices: [], colors: [] },
@@ -154,6 +154,12 @@ function buildPebbles(world, quality) {
   }
   return sizeClasses.map((sizeClass) => {
     const geometry = smoothIcosphere(sizeClass.detail);
+    const pebblePositions = geometry.attributes.position;
+    const pebblePoint = new THREE.Vector3();
+    for (let index = 0; index < pebblePositions.count; index++) {
+      pebblePoint.fromBufferAttribute(pebblePositions, index).multiplyScalar(1 + 0.12 * lumpAt(pebblePoint.x, pebblePoint.y, pebblePoint.z, 1.4));
+      pebblePositions.setXYZ(index, pebblePoint.x, pebblePoint.y, pebblePoint.z);
+    }
     geometry.computeVertexNormals();
     const undersideShade = new Float32Array(geometry.attributes.position.count * 3);
     for (let index = 0; index < geometry.attributes.position.count; index++) undersideShade.fill(0.5 + 0.5 * smoothstep(-0.55, 0.35, geometry.attributes.position.getY(index)), index * 3, index * 3 + 3);

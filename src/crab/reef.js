@@ -28,6 +28,8 @@ const URCHIN_SPINE_TIP = linearColor(0.42, 0.2, 0.5);
 
 const UP = new THREE.Vector3(0, 1, 0);
 const REEF_CHUNK_COUNT = 3;
+const RUBBLE_HIGHEST_FLOOR = -2.6;
+const CORAL_TIP_TAPER = 0.22;
 const REEF_CHUNK_SPAN = 236;
 const reefPropNoise = createNoise2D(311);
 const lumpAt = (x, y, z, frequency) => (reefPropNoise(x * frequency + 3.1, y * frequency) + reefPropNoise(y * frequency + 7.7, z * frequency) + reefPropNoise(z * frequency + 1.3, x * frequency + 5.2)) / 3;
@@ -59,7 +61,7 @@ function buildBranchCoral(prop, radialSegments) {
   const reach = scale * 1.25;
   const grow = (start, direction, length, radius, depth) => {
     const end = start.clone().addScaledVector(direction, length);
-    tubes.push({ geometry: orientedTube(start, direction, length, radius, radius * 0.62, radialSegments), endHeight: end.y });
+    tubes.push({ geometry: orientedTube(start, direction, length, radius, radius * (depth === 0 ? CORAL_TIP_TAPER : 0.62), radialSegments), endHeight: end.y });
     if (depth === 0) return;
     const forks = 2 + Math.floor(random() * 2);
     for (let fork = 0; fork < forks; fork++) {
@@ -161,14 +163,20 @@ function buildRubble(world, quality) {
     const z = 46 + random() * 66;
     if (!world.isOnReef(x, z) || !world.isWalkable(x, z)) continue;
     const height = world.heightAt(x, z);
-    if (height < -3.6) continue;
+    if (height < -3.6 || height > RUBBLE_HIGHEST_FLOOR) continue;
     const size = 0.16 + random() * random() * 0.6;
-    const piece = new THREE.IcosahedronGeometry(1, 0).deleteAttribute('uv').deleteAttribute('normal');
-    piece.scale(size * (0.8 + random() * 0.7), size * (0.35 + random() * 0.3), size * (0.7 + random() * 0.5)).rotateY(random() * Math.PI * 2).translate(x, height + size * 0.1, z);
-    const tint = palette[Math.floor(random() * palette.length)].clone().multiplyScalar(0.75 + random() * 0.4);
-    const indexed = mergeVertices(piece, 1e-4);
+    const seed = random() * 50;
+    const indexed = mergeVertices(new THREE.IcosahedronGeometry(1, 0).deleteAttribute('uv').deleteAttribute('normal'), 1e-4);
+    const positions = indexed.attributes.position;
+    const point = new THREE.Vector3();
+    for (let index = 0; index < positions.count; index++) {
+      point.fromBufferAttribute(positions, index).multiplyScalar(1 + 0.22 * lumpAt(point.x + seed, point.y, point.z, 1.7));
+      positions.setXYZ(index, point.x, point.y, point.z);
+    }
+    indexed.scale(size * (0.8 + random() * 0.5), size * (0.45 + random() * 0.3), size * (0.7 + random() * 0.4)).rotateY(random() * Math.PI * 2).translate(x, height + size * 0.05, z);
+    const tint = palette[Math.floor(random() * palette.length)].clone().multiplyScalar(0.6 + random() * 0.3);
     indexed.computeVertexNormals();
-    pieces.push(paintAll(indexed, (color) => color.copy(tint)));
+    pieces.push(paintAll(indexed, (color, pointX, pointY, pointZ) => color.copy(tint).multiplyScalar(0.8 + 0.3 * lumpAt(pointX, pointY, pointZ, 4))));
   }
   return pieces;
 }

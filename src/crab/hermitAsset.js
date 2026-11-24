@@ -29,27 +29,37 @@ export const WEAPON_MODEL_FIT = {
   shellEdged: { length: 1.9, along: 0.55, rotation: [-Math.PI / 2, 0, 0], anchor: [0, 0, 0], metalness: 0, roughness: 0.85, tint: [0.96, 0.86, 0.72], normalScale: 0.5 },
   coralTipped: { length: 2.0, along: 1.0, rotation: [-Math.PI / 2, 0, 0], anchor: [0, 0, 0], metalness: 0, roughness: 0.75 },
   cleaver: { length: 3.4, along: 0.8, rotation: [-0.504, 0.607, 3.041], anchor: [0.75, 0.19, 0], metalness: 0.45, roughness: 0.4, shoulderCarry: true },
-  shellShield: { length: 1.3, along: 0.75, rotation: [0, Math.PI / 2, 0], anchor: [0, 0, 0], metalness: 0, roughness: 0.6, shield: { ribs: 13, flatness: 0.32, oval: 1, color: [0.94, 0.8, 0.68] } },
+  shellShield: { length: 1.3, along: 0.75, rotation: [0, Math.PI / 2, 0], anchor: [0, 0, 0], metalness: 0, roughness: 0.45, shield: { ribs: 13, ribDepth: 0.11, rings: 4, flatness: 0.42, oval: 0.9, color: [0.98, 0.9, 0.84], rimColor: [0.62, 0.3, 0.34] } },
   lobsterShield: { length: 1.5, along: 0.75, rotation: [0, Math.PI / 2, 0], anchor: [0, 0, 0], metalness: 0.1, roughness: 0.45, shield: { bands: 5, flatness: 0.4, oval: 1.3, color: [0.78, 0.22, 0.12] } },
 };
 
 function buildShieldModel(shape) {
-  const geometry = new THREE.SphereGeometry(0.95, 40, 14, 0, Math.PI * 2, 0, Math.PI / 2.3);
+  const geometry = new THREE.SphereGeometry(0.95, 72, 16, 0, Math.PI * 2, 0, Math.PI / 2.3);
   geometry.rotateX(Math.PI / 2);
   const position = geometry.attributes.position;
+  const colors = new Float32Array(position.count * 3);
+  const base = new THREE.Color().setRGB(...shape.color, THREE.SRGBColorSpace);
+  const rim = new THREE.Color().setRGB(...(shape.rimColor || shape.color), THREE.SRGBColorSpace);
+  const shade = new THREE.Color();
   const point = new THREE.Vector3();
+  const outerRadial = 0.95 * Math.sin(Math.PI / 2.3);
   for (let index = 0; index < position.count; index++) {
     point.fromBufferAttribute(position, index);
     const angle = Math.atan2(point.y, point.x);
     const radial = Math.hypot(point.x, point.y);
-    const ridge = shape.ribs ? Math.max(0, Math.cos(angle * shape.ribs)) * 0.05 * radial : Math.abs(Math.sin(point.y * shape.bands * 1.6)) * 0.09;
+    const rib = shape.ribs ? Math.max(0, Math.cos(angle * shape.ribs)) : 0;
+    const ridge = shape.ribs ? rib * (shape.ribDepth ?? 0.05) * radial : Math.abs(Math.sin(point.y * shape.bands * 1.6)) * 0.09;
     point.z = point.z * shape.flatness + ridge;
     point.y *= shape.oval;
     position.setXYZ(index, point.x, point.y, point.z);
+    const edge = THREE.MathUtils.smoothstep(radial / outerRadial, 0.78, 0.97);
+    const growthRing = shape.rings ? 0.5 + 0.5 * Math.cos((radial / outerRadial) * shape.rings * Math.PI * 2) : 0.5;
+    shade.copy(base).multiplyScalar(0.8 + 0.28 * rib + 0.12 * growthRing).lerp(rim, edge);
+    colors.set([shade.r, shade.g, shade.b], index * 3);
   }
+  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.computeVertexNormals();
-  const material = new THREE.MeshStandardMaterial();
-  material.color.setRGB(...shape.color, THREE.SRGBColorSpace);
+  const material = new THREE.MeshStandardMaterial({ vertexColors: true });
   return new THREE.Mesh(geometry, material);
 }
 const WEAPON_MODEL_LENGTH = 1.9;
@@ -86,6 +96,7 @@ export function dressWeaponMaterial(kind, material, { thumbnail = false } = {}) 
   material.normalScale.copy(source.normalScale).multiplyScalar(fit.normalScale ?? 1);
   if (fit.tint) material.color.setRGB(...fit.tint, THREE.SRGBColorSpace);
   else if (fit.shield) material.color.copy(source.color);
+  material.vertexColors = Boolean(fit.shield);
   material.side = THREE.DoubleSide;
   material.needsUpdate = true;
   return material;
