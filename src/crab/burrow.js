@@ -48,6 +48,10 @@ const ENTRANCE_MODEL_WIDTH = 3.9;
 const ENTRANCE_HOLE_SHARE = 0.17;
 const ENTRANCE_HOLE_HEIGHT = 0.42;
 const EXIT_MODEL_WIDTH = 3.3;
+const MOUTH_RISE_OFFSET = BURROW_CELL * 0.6;
+const MOUTH_MODEL_OFFSET = BURROW_CELL * 0.55;
+const THROAT_OFFSET = BURROW_CELL * 0.5;
+const THROAT_SHARE = 0.62;
 const MODEL_SAND_TINT = [1.32, 1.12, 0.86];
 
 const burrowModels = new Map();
@@ -75,6 +79,52 @@ function buildPropModel(name, width, material) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   return mesh;
+}
+
+let exitGeometry = null;
+let throatTexture = null;
+
+function buildThroat(width) {
+  if (!throatTexture) {
+    const size = 32;
+    const data = new Uint8Array(size * size * 4);
+    for (let row = 0; row < size; row++) {
+      for (let column = 0; column < size; column++) {
+        const across = Math.abs(column - size / 2 + 0.5) / (size / 2);
+        const up = row / (size - 1);
+        const arch = Math.hypot(across, Math.max(0, up - 0.35) / 0.65);
+        const alpha = 1 - THREE.MathUtils.smoothstep(arch, 0.55, 1);
+        data.set([0, 0, 0, Math.round(alpha * 235)], (row * size + column) * 4);
+      }
+    }
+    throatTexture = new THREE.DataTexture(data, size, size);
+    throatTexture.magFilter = THREE.LinearFilter;
+    throatTexture.needsUpdate = true;
+  }
+  const throat = new THREE.Mesh(new THREE.PlaneGeometry(width, width * 0.85).translate(0, width * 0.425, 0), new THREE.MeshBasicMaterial({ map: throatTexture, transparent: true, depthWrite: false }));
+  throat.renderOrder = 1;
+  return throat;
+}
+
+function exitThroatGeometry() {
+  const source = burrowModels.get('burrow_exit');
+  if (!source) return null;
+  if (exitGeometry) return exitGeometry;
+  exitGeometry = source.geometry.clone();
+  exitGeometry.computeBoundingBox();
+  const bounds = exitGeometry.boundingBox;
+  const position = exitGeometry.attributes.position;
+  const colors = new Float32Array(position.count * 3);
+  const halfWidth = (bounds.max.x - bounds.min.x) / 2;
+  const centerX = (bounds.max.x + bounds.min.x) / 2;
+  for (let index = 0; index < position.count; index++) {
+    const depth = THREE.MathUtils.smoothstep(bounds.max.z - position.getZ(index), 0, bounds.max.z - bounds.min.z);
+    const inner = 1 - THREE.MathUtils.smoothstep(Math.abs(position.getX(index) - centerX) / halfWidth, 0.35, 0.8);
+    const shade = 1 - 0.75 * depth * inner;
+    colors.set([WALL_COLOR.r * shade, WALL_COLOR.g * shade, WALL_COLOR.b * shade], index * 3);
+  }
+  exitGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  return exitGeometry;
 }
 
 export const STATION_KINDS = {
@@ -375,6 +425,7 @@ function setLayers(object, layers) {
 
 export function createBurrow(scene, world, quality, labelParent, saved) {
   let decor = null;
+  const exitMouths = [];
   const state = saved ? structuredClone(saved) : createEmptyBurrow();
   migrateLegacyGrid(state);
   let nextStationId = state.stations.reduce((highest, station) => Math.max(highest, station.id || 0), 0) + 1;
@@ -456,12 +507,29 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   shaft.beam.position.set(shaftCenter.x - BURROW_ORIGIN.x, 0, shaftCenter.z - BURROW_ORIGIN.z);
   shaft.pool.position.copy(shaft.beam.position);
   interior.add(shaft.beam, shaft.pool);
-  const exitModel = buildPropModel('burrow_exit', EXIT_MODEL_WIDTH, new THREE.MeshStandardMaterial({ roughness: 0.95, side: THREE.DoubleSide }));
+  const exitMaterial = applyBurrowSurface(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.94, side: THREE.DoubleSide }), 'sand', BURROW_ORIGIN.y, WALL_HEIGHT);
+  function buildExitModel(width) {
+    const model = buildPropModel('burrow_exit', width, exitMaterial);
+    if (!model) return null;
+    exitMaterial.map = null;
+    exitMaterial.normalMap = null;
+    exitMaterial.roughnessMap = null;
+    exitMaterial.color.setRGB(1, 1, 1);
+    model.geometry = exitThroatGeometry();
+    model.castShadow = false;
+    return model;
+  }
+  const exitModel = buildExitModel(EXIT_MODEL_WIDTH);
   if (exitModel) {
     exitModel.position.x = shaftCenter.x - BURROW_ORIGIN.x;
-    exitModel.position.z = shaftCenter.z - BURROW_ORIGIN.z + BURROW_CELL * 0.35;
+    exitModel.position.z = shaftCenter.z - BURROW_ORIGIN.z + MOUTH_MODEL_OFFSET;
     exitModel.rotation.y = Math.PI;
     exitModel.position.y -= EXIT_MODEL_SINK;
+    const startThroat = buildThroat(EXIT_MODEL_WIDTH * THROAT_SHARE);
+    startThroat.position.set(exitModel.position.x, 0, shaftCenter.z - BURROW_ORIGIN.z + THROAT_OFFSET);
+    startThroat.rotation.y = Math.PI;
+    exitModel.userData.throat = startThroat;
+    interior.add(startThroat);
     interior.add(exitModel);
     shaft.beam.visible = false;
   }
@@ -541,8 +609,11 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
       weight += share;
     }
     const filled = total / weight;
-    const exitDistance = Math.hypot(x - (shaftCenter.x - BURROW_ORIGIN.x), z - (shaftCenter.z - BURROW_ORIGIN.z) - BURROW_CELL * 0.6);
-    const exitRise = state.entranceClosed ? 0 : (EXIT_SAND_HEIGHT - WALL_HEIGHT) * (1 - THREE.MathUtils.smoothstep(exitDistance, BURROW_CELL * 0.9, BURROW_CELL * 2.3));
+    let exitRise = 0;
+    for (const mouth of exitMouths) {
+      const exitDistance = Math.hypot(x - mouth.x - mouth.directionX * MOUTH_RISE_OFFSET, z - mouth.z - mouth.directionZ * MOUTH_RISE_OFFSET);
+      exitRise = Math.max(exitRise, (EXIT_SAND_HEIGHT - WALL_HEIGHT) * (1 - THREE.MathUtils.smoothstep(exitDistance, BURROW_CELL * 0.9, BURROW_CELL * 2.3)));
+    }
     const lipBite = 0.09 * sandNoise(x * 1.9 + 11, z * 1.9 - 7);
     const shaped = THREE.MathUtils.smoothstep(filled, 0.44, 0.76 + lipBite);
     const hollow = 0.16 * Math.max(0, sandNoise(x * 0.9 - 4, z * 0.9 + 9)) * Math.sin(Math.PI * shaped);
@@ -573,7 +644,20 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     return false;
   }
 
+  function refreshExitMouths() {
+    exitMouths.length = 0;
+    const mouthAt = (cell, directionColumn, directionRow) => {
+      const center = cellCenter(cell.column, cell.row);
+      exitMouths.push({ x: center.x - BURROW_ORIGIN.x, z: center.z - BURROW_ORIGIN.z, directionX: directionColumn, directionZ: directionRow });
+    };
+    if (!state.entranceClosed) mouthAt(SHAFT_CELL, 0, 1);
+    for (const station of state.stations) {
+      if (station.kind === 'exit' && station.access) mouthAt(station, station.column - station.access.column, station.row - station.access.row);
+    }
+  }
+
   function rebuildWalls(nearColumn = null, nearRow = null) {
+    refreshExitMouths();
     for (const chunk of sandChunks) {
       if (nearColumn !== null) {
         const reachColumn = nearColumn < chunk.firstColumn - DETAIL_MARGIN_CELLS - 1 || nearColumn > chunk.firstColumn + SAND_CHUNK_CELLS + DETAIL_MARGIN_CELLS;
@@ -693,11 +777,17 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   function addExitMeshes(station) {
     const spot = stationSpot(station);
     const below = new THREE.Group();
-    const model = buildPropModel('burrow_exit', EXIT_MODEL_WIDTH * 0.85, new THREE.MeshStandardMaterial({ roughness: 0.95, side: THREE.DoubleSide }));
+    const model = buildExitModel(EXIT_MODEL_WIDTH * 0.85);
+    const directionColumn = station.access ? station.column - station.access.column : 0;
+    const directionRow = station.access ? station.row - station.access.row : 1;
     if (model) {
-      model.rotation.y = Math.PI;
-      model.position.y -= EXIT_MODEL_SINK * 0.6;
+      model.rotation.y = Math.atan2(-directionColumn, -directionRow);
+      model.position.set(directionColumn * MOUTH_MODEL_OFFSET, model.position.y - EXIT_MODEL_SINK * 0.6, directionRow * MOUTH_MODEL_OFFSET);
       below.add(model);
+      const throat = buildThroat(EXIT_MODEL_WIDTH * 0.85 * THROAT_SHARE);
+      throat.rotation.y = Math.atan2(-directionColumn, -directionRow);
+      throat.position.set(directionColumn * THROAT_OFFSET, 0, directionRow * THROAT_OFFSET);
+      below.add(throat);
     }
     const pool = shaft.pool.clone();
     pool.position.set(0, 0, 0);
@@ -711,6 +801,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     scene.add(above);
     stationMeshes.set(station, below);
     surfaceMeshes.set(station, above);
+    rebuildWalls(station.column, station.row);
   }
 
   function walkableCellAt(x, z) {
@@ -928,7 +1019,10 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   function showEntranceOpen() {
     const open = !state.entranceClosed;
     entranceGroup.visible = open;
-    if (exitModel) exitModel.visible = open;
+    if (exitModel) {
+      exitModel.visible = open;
+      exitModel.userData.throat.visible = open;
+    }
     else shaft.beam.visible = open;
     shaft.pool.visible = open;
   }
@@ -1101,6 +1195,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     surfaceMeshes.delete(station);
     if (station.label) station.label.remove();
     state.stations.splice(state.stations.indexOf(station), 1);
+    if (station.kind === 'exit') rebuildWalls();
   }
 
   function hasStation(kind) {
@@ -1136,7 +1231,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     highlightMaterial.opacity = 0.32 + 0.16 * Math.sin(time * 4);
     updateChunks(Math.min(0.1, Math.max(0, time - (lastUpdateTime ?? time))));
     lastUpdateTime = time;
-    shaft.pool.material.opacity = 0.3 + 0.06 * Math.sin(time * 1.3);
+    shaft.pool.material.opacity = 0.18 + 0.04 * Math.sin(time * 1.3);
     decor?.update(time, underground && !state.entranceClosed);
   }
 
@@ -1148,6 +1243,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     burrowCell: BURROW_CELL,
     wallHeight: WALL_HEIGHT,
     density: quality.density,
+    exitMouths,
     isDug,
     insideGrid,
     stationAt,

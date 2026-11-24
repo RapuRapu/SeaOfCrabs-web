@@ -120,16 +120,22 @@ function rootGeometry() {
 }
 
 function slumpGeometry() {
-  const cone = new THREE.ConeGeometry(1, 1, 12, 2).translate(0, 0.5, 0);
-  const position = cone.attributes.position;
+  const mound = mergeVertices(new THREE.SphereGeometry(1, 18, 6, 0, Math.PI * 2, 0, Math.PI / 2).deleteAttribute('normal').deleteAttribute('uv'));
+  const position = mound.attributes.position;
+  const colors = new Float32Array(position.count * 3);
+  const color = new THREE.Color();
   for (let index = 0; index < position.count; index++) {
     const x = position.getX(index);
     const z = position.getZ(index);
     const angle = Math.atan2(z, x);
-    const wobble = 1 + 0.18 * Math.sin(angle * 3 + 1.3) + 0.1 * Math.sin(angle * 7);
-    position.setXYZ(index, x * wobble, position.getY(index) * (0.85 + 0.15 * Math.sin(angle * 5)), z * wobble);
+    const wobble = 1 + 0.16 * Math.sin(angle * 3 + 1.3) + 0.08 * Math.sin(angle * 7);
+    const height = position.getY(index) ** 1.6;
+    position.setXYZ(index, x * wobble, height, z * wobble);
+    color.copy(linear(0.78, 0.65, 0.48)).multiplyScalar(0.75 + 0.3 * height).toArray(colors, index * 3);
   }
-  return shaded(cone, (color, x, y) => color.copy(linear(0.78, 0.65, 0.48)).multiplyScalar(0.72 + 0.35 * y));
+  mound.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  mound.computeVertexNormals();
+  return mound;
 }
 
 function contactTexture() {
@@ -158,7 +164,7 @@ function createKind(parent, geometry, capacity, materialOptions = {}) {
   return { mesh, capacity };
 }
 
-export function createBurrowDecor(interior, { burrowCell, wallHeight, density, isDug, insideGrid, stationAt, sandHeightAt, cellLocal, cellRange, shaftLocal }) {
+export function createBurrowDecor(interior, { burrowCell, wallHeight, density, exitMouths, isDug, insideGrid, stationAt, sandHeightAt, cellLocal, cellRange, shaftLocal }) {
   const kinds = {
     pebble: createKind(interior, pebbleGeometry(1), 6000, { roughness: 0.45 }),
     boulder: createKind(interior, pebbleGeometry(2), 600, { roughness: 0.42 }),
@@ -267,10 +273,34 @@ export function createBurrowDecor(interior, { burrowCell, wallHeight, density, i
     return null;
   }
 
+  const nearMouth = (x, z) => exitMouths.some((mouth) => Math.hypot(x - mouth.x - mouth.directionX * burrowCell * 0.5, z - mouth.z - mouth.directionZ * burrowCell * 0.5) < burrowCell * 0.75);
+
+  function decorateMouth(mouth) {
+    const random = cellRandom(Math.round(mouth.x * 10), Math.round(mouth.z * 10), 50);
+    const sideX = mouth.directionZ;
+    const sideZ = -mouth.directionX;
+    const frontX = mouth.x + mouth.directionX * burrowCell * 0.15;
+    const frontZ = mouth.z + mouth.directionZ * burrowCell * 0.15;
+    for (const side of [-1, 1]) {
+      const reach = burrowCell * (0.44 + random() * 0.05);
+      const size = 0.6 + random() * 0.2;
+      const x = frontX + sideX * side * reach;
+      const z = frontZ + sideZ * side * reach;
+      place('slump', x, -0.02, z, up, random() * 6.3, size * 1.3, size * 0.55, size * 1.3, tint.setRGB(1, 1, 1));
+      const pebbleSize = 0.14 + random() * 0.14;
+      place('pebble', x - mouth.directionX * 0.6 + sideX * side * 0.2, -pebbleSize * 0.1, z - mouth.directionZ * 0.6 + sideZ * side * 0.2, up, random() * 6.3, pebbleSize, pebbleSize, pebbleSize, stoneTint(random));
+      if (random() < 0.6) {
+        const shellSize = 0.2 + random() * 0.1;
+        place('shell', x - mouth.directionX * 0.9, 0.01, z - mouth.directionZ * 0.9, up, random() * 6.3, shellSize, shellSize, shellSize, shellTint(random));
+      }
+    }
+  }
+
   function decorateWalls(column, row) {
     const center = cellLocal(column, row);
     DIRECTIONS.forEach(([stepColumn, stepRow], side) => {
       if (isDug(column + stepColumn, row + stepRow) || !insideGrid(column + stepColumn, row + stepRow)) return;
+      if (nearMouth(center.x + stepColumn * burrowCell * 0.5, center.z + stepRow * burrowCell * 0.5)) return;
       const random = cellRandom(column, row, 10 + side);
       const sideways = () => (random() - 0.5) * burrowCell * 0.8;
       const base = (height) => {
@@ -389,6 +419,7 @@ export function createBurrowDecor(interior, { burrowCell, wallHeight, density, i
         if (nearest <= TOP_REACH_CELLS) decorateTop(column, row, nearest <= 1 ? 1 : nearest <= 2 ? 0.6 : 0.3);
       }
     }
+    for (const mouth of exitMouths) decorateMouth(mouth);
     for (const kind of Object.values(kinds)) {
       kind.mesh.instanceMatrix.needsUpdate = true;
       if (kind.mesh.instanceColor) kind.mesh.instanceColor.needsUpdate = true;
