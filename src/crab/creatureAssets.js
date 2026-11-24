@@ -241,5 +241,14 @@ export function createCreature(kind, quality) {
   }
 
   const posers = { shoreCrab: poseShoreCrab, sandHopper: poseHopper, gull: poseGull, cockroach: poseCockroach, rat: poseRat, shipCat: poseCat, octopus: poseOctopus, mantisShrimp: poseMantis, giantLobster: poseLobster, moray: poseMoray };
-  return { object: model, setFlash, pose: posers[kind], height: limbs.height, length };
+  const fingeredLimbs = new Set(fingers.map((finger) => bones[`${finger.name}_1`].parent.name.replace(/_(\d+|tip)$/, '')));
+  const fingeredArms = arms.filter((arm) => fingeredLimbs.has(arm.name));
+  const grippingArms = (fingeredArms.length >= 2 ? fingeredArms : arms.filter((arm) => arm.tip.y <= limbs.height * 0.6)).sort((a, b) => a.side - b.side);
+  const handOf = (arm) => {
+    const bone = bones[`${arm.name}_3`];
+    return { bone, side: arm.side, length: bones[`${arm.name}_tip`].position.length() };
+  };
+  const hands = grippingArms.length >= 2 ? { big: handOf(grippingArms[0]), small: handOf(grippingArms[grippingArms.length - 1]) } : null;
+
+  return { object: model, setFlash, pose: posers[kind], height: limbs.height, length, hands };
 }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { attackOf, defenseOf, levelOf, labelOf, canLoot, takeFrom, giveUpLoot, lootedItems, serializeLooters, restoreLooters } from './looting.js';
 import { createPerformanceMonitor } from '../performance.js';
 import { QUALITY_LEVELS, chosenQualityName, storeQualityName } from './quality.js';
 import { seaUniforms, SEA_COMMON_GLSL, lighting, cutawayUniforms } from './seaside.js';
@@ -259,6 +260,13 @@ const POSES = {
   73: { x: 24, z: -27, distance: 12, tideShare: 0.56, heading: 1.75, outfit: { shell: 'whelk', claws: 'coralTipped', quality: 'fine' } },
   30: { x: 15, z: -20, distance: 22, tideShare: 0.56, heading: 0.9, workshop: true, naked: true, backpack: true, remainsAt: { x: -20, z: -40 } },
   24: { x: -1, z: -6, distance: 16, tideShare: 0.75, heading: 0.4, enemy: { kind: 'shoreCrab', offsetX: -2.8, offsetZ: 0.6 }, fightSeconds: 3.2 },
+  122: { x: 15, z: -20, distance: 18, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 2.6, offsetZ: 1.6 } },
+  123: { x: 15, z: -20, distance: 12, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 2.6, offsetZ: 1.6, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } } },
+  124: { x: -1, z: -6, distance: 12, tideShare: 0.75, heading: 0.4, level: 9, enemy: { kind: 'shoreCrab', offsetX: -3.2, offsetZ: 1.2, loot: { big: 'coralTipped', small: 'shellEdged' } } },
+  125: { x: 10, z: 80, distance: 18, tideShare: 0.75, heading: 0.4, level: 8, revealAround: 60, enemy: { kind: 'octopus', offsetX: 2.5, offsetZ: 2.5, loot: { shell: 'turban' } } },
+  126: { x: -60, z: 91, distance: 28, tideShare: 0.75, heading: 0.2, level: 10, outfit: { shell: 'coral', claws: 'coralTipped', quality: 'fine' }, revealAround: 60, enemy: { kind: 'giantLobster', offsetX: -2, offsetZ: 6.5, loot: { big: 'cleaver' } } },
+  128: { x: -1, z: -6, distance: 6, tideShare: 0.75, heading: 0.4, level: 9, enemy: { kind: 'shoreCrab', offsetX: -1.8, offsetZ: 0.4, loot: { big: 'coralTipped', small: 'shellEdged' } } },
+  127: { x: 15, z: -20, distance: 10, tideShare: 0.56, heading: 0.9, level: 6, enemy: { kind: 'rivalHermit', offsetX: 2.6, offsetZ: 1.6, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } }, fightSeconds: 1.2, moment: 'strike' },
   25: { x: 30, z: -40, distance: 13, tideShare: 0.56, heading: 0.5, enemy: { kind: 'sandHopper', offsetX: 1.4, offsetZ: 2.6 }, fightSeconds: 0 },
   26: { x: 0, z: -104, distance: 40, tideShare: 0.56, heading: 3.2, level: 6, enemy: { kind: 'gull', offsetX: -2, offsetZ: -5.5 }, fightSeconds: 3.4 },
   27: { x: 4, z: -80, distance: 50, tideShare: 0.56, heading: 3.4, gullCircling: true },
@@ -266,7 +274,7 @@ const POSES = {
 };
 
 function createEmptySave() {
-  return { version: SAVE_VERSION, x: HOME_SPOT.x, z: HOME_SPOT.z, heading: STARTING_HEADING, worldTime: STARTING_TIDE_TIME, inventory: {}, nodes: null, goalAnnounced: false, hasMoved: false, wetness: 0, wetHeight: 0, gear: null, workshopBuilt: false, craftedOnce: false, progression: null, remains: [], burrow: null, storage: { inventory: {}, shells: [], claws: [] }, underground: false, helpers: [], rack: null, wellFedSeconds: 0, reefFound: false, reefGearCrafted: false, campFound: false, campGearCrafted: false, holdFound: false, bossDefeatedAt: {} };
+  return { version: SAVE_VERSION, x: HOME_SPOT.x, z: HOME_SPOT.z, heading: STARTING_HEADING, worldTime: STARTING_TIDE_TIME, inventory: {}, nodes: null, goalAnnounced: false, hasMoved: false, wetness: 0, wetHeight: 0, gear: null, workshopBuilt: false, craftedOnce: false, progression: null, remains: [], looters: [], burrow: null, storage: { inventory: {}, shells: [], claws: [] }, underground: false, helpers: [], rack: null, wellFedSeconds: 0, reefFound: false, reefGearCrafted: false, campFound: false, campGearCrafted: false, holdFound: false, bossDefeatedAt: {} };
 }
 
 function migrateSave(stored) {
@@ -471,6 +479,7 @@ const enemies = createEnemies({
     soundAt('hitThud', enemy.x, enemy.z, 0.7);
   },
 });
+restoreLooters(enemies.list, save.looters);
 const buildPanel = createBuildPanel(hud.root, {
   inventory: () => save.inventory,
   hasStation: (kind) => (STATION_KINDS[kind].surface ? rack.exists : burrow.hasStation(kind)),
@@ -1049,7 +1058,7 @@ let startingOver = false;
 function persist() {
   if (isScreenshotMode || startingOver) return;
   noteDiscoveries();
-  Object.assign(save, { fog: fog.serialize(), x: player.x, z: player.z, heading: player.heading, nodes: resources.serialize(), wetness: player.wetness, wetHeight: player.wetHeight, gear: gear.serialize(), progression: progression.serialize(), remains: remains.serialize(), burrow: burrow.serialize(), storage, underground, cameraDistances: { ...cameraDistances, [underground ? 'burrow' : 'surface']: cameraDistance }, helpers: helpers.serialize(), rack: rack.serialize(), wellFedSeconds: Math.max(0, (player.wellFedUntil || 0) - simulationTime), restedSeconds: Math.max(0, (player.restedUntil || 0) - simulationTime), softSeconds: Math.max(0, (player.softUntil || 0) - simulationTime), moltSeconds: Math.max(0, player.moltTimer || 0), moltKind: player.moltKind || null });
+  Object.assign(save, { fog: fog.serialize(), x: player.x, z: player.z, heading: player.heading, nodes: resources.serialize(), wetness: player.wetness, wetHeight: player.wetHeight, gear: gear.serialize(), progression: progression.serialize(), remains: remains.serialize(), looters: serializeLooters(enemies.list), burrow: burrow.serialize(), storage, underground, cameraDistances: { ...cameraDistances, [underground ? 'burrow' : 'surface']: cameraDistance }, helpers: helpers.serialize(), rack: rack.serialize(), wellFedSeconds: Math.max(0, (player.wellFedUntil || 0) - simulationTime), restedSeconds: Math.max(0, (player.restedUntil || 0) - simulationTime), softSeconds: Math.max(0, (player.softUntil || 0) - simulationTime), moltSeconds: Math.max(0, player.moltTimer || 0), moltKind: player.moltKind || null });
   try {
     localStorage.setItem(SAVE_KEY, JSON.stringify(save));
   } catch {
@@ -2126,9 +2135,9 @@ function strike(enemy) {
   const isSting = stats.ability && stats.ability.id === 'sting' && player.hitCount % (stats.ability.everyHits || STING_EVERY_HITS) === 0;
   const pierces = Boolean(stats.ability && stats.ability.pierce);
   const hand = stats.strikingHands[player.hitCount % stats.strikingHands.length];
-  const roll = rollDamageDetailed(stats.handAttack[hand], pierces ? 0 : enemy.definition.defense);
+  const roll = rollDamageDetailed(stats.handAttack[hand], pierces ? 0 : defenseOf(enemy));
   const damage = roll.damage * (isSting ? 2 : 1);
-  const armourText = pierces ? 'armour pierced' : `its armour ${enemy.definition.defense || 0} blocks ${roundedText(roll.blocked)}`;
+  const armourText = pierces ? 'armour pierced' : `its armour ${defenseOf(enemy)} blocks ${roundedText(roll.blocked)}`;
   hud.log('combat', `You hit ${enemy.definition.label} for ${damage} — ${stats.strikingHands.length > 1 ? `${HAND_LABELS[hand].toLowerCase()}, ` : ''}attack ${stats.handAttack[hand]}, ${armourText}, ${rollText(roll.spread)}${isSting ? ', sting ×2' : ''}`);
   player.lastCombatTime = simulationTime;
   floatAt(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight * 0.7, enemy.z, isSting ? `${damage}!` : String(damage), isSting ? 'sting' : 'dealt');
@@ -2155,7 +2164,7 @@ function hitPlayer(enemy) {
     player.lastCombatTime = simulationTime;
     return;
   }
-  const roll = rollDamageDetailed(enemy.definition.attack, stats.defense);
+  const roll = rollDamageDetailed(attackOf(enemy), stats.defense);
   let damage = roll.damage;
   const modifiers = [];
   if (stats.ability && stats.ability.dreadFactor) {
@@ -2174,7 +2183,8 @@ function hitPlayer(enemy) {
     enemies.damage(enemy, stats.thorns, simulationTime);
   }
   progression.state.health -= damage;
-  hud.log('combat', `${enemy.definition.label} hits you for ${damage} — attack ${enemy.definition.attack}, your armour ${stats.defense} blocks ${roundedText(roll.blocked)} [${armourParts()}], ${rollText(roll.spread)}${modifiers.length ? `, ${modifiers.join(', ')}` : ''} · ${healthText()}`);
+  player.lastHitBy = enemy;
+  hud.log('combat', `${enemy.definition.label} hits you for ${damage} — attack ${attackOf(enemy)}, your armour ${stats.defense} blocks ${roundedText(roll.blocked)} [${armourParts()}], ${rollText(roll.spread)}${modifiers.length ? `, ${modifiers.join(', ')}` : ''} · ${healthText()}`);
   player.lastCombatTime = simulationTime;
   floatAt(player.x, player.y + 2.4, player.z, `−${damage}`, 'taken');
   hud.flashHurt();
@@ -2242,7 +2252,7 @@ function dropLoot(enemy) {
 }
 
 function rewardHelperKill(helper, enemy) {
-  const experience = experienceForKill(enemy.definition.experience, enemy.definition.level, helper.level || 1);
+  const experience = experienceForKill(enemy.definition.experience, levelOf(enemy), helper.level || 1);
   const levelsGained = helpers.gainExperience(helper, experience);
   hud.log('helperCombat', `${helpers.nameOf(helper)} defeated the ${enemy.definition.label.toLowerCase()} (+${experience} XP)`);
   floatAt(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight, enemy.z, `Helper +${experience} XP`, 'experience');
@@ -2265,24 +2275,25 @@ function rewardAssistingHelpers(enemy, attacker) {
   if (!assistingIds) return;
   for (const helper of helpers.list) {
     if (helper === attacker || !assistingIds.has(helper.id)) continue;
-    const helperExperience = experienceForKill(enemy.definition.experience, enemy.definition.level, helper.level || 1);
+    const helperExperience = experienceForKill(enemy.definition.experience, levelOf(enemy), helper.level || 1);
     hud.log('helperCombat', `${helpers.nameOf(helper)} helped defeat the ${enemy.definition.label.toLowerCase()} (+${helperExperience} XP)`);
     if (helpers.gainExperience(helper, helperExperience)) hud.log('helper', `${helpers.nameOf(helper)} reached level ${helper.level}!`);
   }
 }
 
 function enemyKilled(enemy, attacker = null) {
+  dropStolenGear(enemy);
   if (player.combatTarget === enemy) player.combatTarget = null;
   rewardAssistingHelpers(enemy, attacker);
   if (attacker && attacker.helperId && attacker.job === 'follow') {
-    const helperExperience = experienceForKill(enemy.definition.experience, enemy.definition.level, attacker.level || 1);
+    const helperExperience = experienceForKill(enemy.definition.experience, levelOf(enemy), attacker.level || 1);
     hud.log('helperCombat', `${helpers.nameOf(attacker)} landed the final blow (+${helperExperience} XP)`);
     if (helpers.gainExperience(attacker, helperExperience)) hud.log('helper', `${helpers.nameOf(attacker)} reached level ${attacker.level}!`);
   } else if (attacker && attacker.helperId) {
     rewardHelperKill(attacker, enemy);
     return;
   }
-  const experience = experienceForKill(enemy.definition.experience, enemy.definition.level, progression.state.level);
+  const experience = experienceForKill(enemy.definition.experience, levelOf(enemy), progression.state.level);
   const levelsGained = progression.gainExperience(experience);
   hud.log('combat', `${enemy.definition.label} defeated (+${experience} XP)`);
   floatAt(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight, enemy.z, `+${experience} XP`, 'experience');
@@ -2322,8 +2333,27 @@ function die() {
   hud.showDeath();
 }
 
+function stealWornGear(dropped) {
+  const looter = player.lastHitBy;
+  player.lastHitBy = null;
+  if (!looter || !enemies.alive(looter) || !canLoot(looter.kind)) return;
+  const taken = takeFrom(looter, dropped);
+  if (!taken.length) return;
+  const names = taken.map((item) => itemName(SHELLS[item.kind] ? 'shell' : 'claws', item)).join(' and ');
+  hud.log('combat', `${looter.definition.label} took your ${names}`);
+}
+
+function dropStolenGear(enemy) {
+  if (!lootedItems(enemy).length) return;
+  const returned = giveUpLoot(enemy);
+  remains.add({ x: enemy.x, z: enemy.z, inventory: {}, gear: returned });
+  const names = [...returned.shells, ...returned.claws].map((item) => itemName(SHELLS[item.kind] ? 'shell' : 'claws', item)).join(' and ');
+  hud.log('loot', `${enemy.definition.label} dropped your ${names}`);
+}
+
 function finishDeath() {
   const dropped = gear.dropAll();
+  stealWornGear(dropped);
   progression.loseSkillOnDeath();
   player.softUntil = 0;
   const carried = Object.fromEntries(Object.entries(save.inventory).filter(([, amount]) => amount > 0));
@@ -3120,6 +3150,7 @@ function openMap() {
     bosses: enemies.list.filter((enemy) => enemy.definition.boss || enemy.kind === 'gull').map((enemy) => ({ x: enemy.home.x, z: enemy.home.z })),
     entrances: burrow.exists ? burrow.travelPoints().map((point) => point.surface) : [],
     remains: remains.list.map((entry) => ({ x: entry.x, z: entry.z })).filter((point) => fog.isRevealed(point.x, point.z)),
+    looters: enemies.list.filter((enemy) => lootedItems(enemy).length && enemies.alive(enemy)).map((enemy) => ({ x: enemy.x, z: enemy.z })),
     rack: rack.exists ? { x: rack.state.x, z: rack.state.z } : null,
   });
 }
@@ -3316,6 +3347,8 @@ if (isScreenshotMode) {
   } else if (pose.enemy) {
     const enemySpot = navigation.nearestWalkable(spot.x + pose.enemy.offsetX, spot.z + pose.enemy.offsetZ, 10);
     const enemy = enemies.spawn(pose.enemy.kind, enemySpot.x, enemySpot.z);
+    if (pose.revealAround) fog.reveal(spot.x, spot.z, pose.revealAround);
+    if (pose.enemy.loot) enemy.loot = Object.fromEntries(Object.entries(pose.enemy.loot).map(([slot, kind], index) => [slot, { id: 900 + index, kind, quality: 'fine' }]));
     for (const other of enemies.list.filter((candidate) => candidate !== enemy)) Object.assign(other, { state: 'dead', respawnTimer: 999 });
     enemy.heading = Math.atan2(spot.x - enemySpot.x, spot.z - enemySpot.z);
     if (enemy.definition.flies) {
@@ -3382,6 +3415,7 @@ window.__debug = {
   isPaused: () => paused,
   advanceWallClock: (milliseconds) => { wallClockOffsetMs += milliseconds; },
   bossRestRemainingMs, dropLoot, regionAt,
+  looting: { attackOf, defenseOf, levelOf, labelOf, canLoot },
   equipBuild(shellKind, clawKind, invested) {
     gear.state.shells = shellKind ? [{ id: 500, kind: shellKind, quality: invested ? 'masterwork' : 'fine', reinforcement: invested ? 'metalPlate' : undefined }] : [];
     gear.state.claws = [{ id: 2, kind: 'bare', quality: 'fine' }, { id: 501, kind: clawKind, quality: invested ? 'masterwork' : 'fine', binding: invested && clawKind !== 'bare' ? 'wire' : undefined }];

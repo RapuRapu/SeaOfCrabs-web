@@ -1,4 +1,8 @@
 import * as THREE from 'three';
+import { levelOf, labelOf } from './looting.js';
+import { createHermit } from './hermit.js';
+import { SHELLS } from './gear.js';
+import { buildHeldWeapon, weaponModelAvailable, dressWeaponMaterial, buildShellModel, dressShellMaterial, shellModelAvailable } from './hermitAsset.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { applySeaside } from './seaside.js';
 import { random } from './random.js';
@@ -25,6 +29,7 @@ export const ENEMY_KINDS = {
   shipCat: { label: "Ship's cat", level: 11, health: 1300, attack: 36, defense: 12, attackInterval: 2.4, windup: 1.0, speed: 4.2, radius: 2.9, temperament: 'aggressive', sightRange: 0, telegraph: { reach: 3.8, radius: 3.0, pounceEvery: 3, pounceRange: 16, pounceRadius: 3.4, pounceWindup: 1.5 }, experience: 1500, pearlChance: 1, pearlCount: 3, respawnSeconds: MINIBOSS_RESPAWN_SECONDS, barHeight: 7.5, boss: true, camp: true },
   cockroach: { label: 'Cockroach', level: 9, drops: ['wax', 'fishBone'], health: 90, attack: 26, defense: 10, attackInterval: 1.0, windup: 0.25, speed: 7.5, radius: 1.1, bodyReach: 2.2, temperament: 'aggressive', sightRange: 9, experience: 160, pearlChance: 0.1, respawnSeconds: 100, barHeight: 2.4, hold: true },
   cook: { label: 'The Cook', level: 13, health: 1550, attack: 48, defense: 16, attackInterval: 2.6, windup: 1.3, speed: 4.3, radius: 3.6, temperament: 'aggressive', sightRange: 0, nerves: true, flees: true, telegraph: { shape: 'line', lineLength: 24, lineWidth: 3.6, lineRange: 15, stompEvery: 3, stompRadius: 7.5, stompWindup: 1.1 }, experience: 2000, pearlChance: 1, pearlCount: 4, respawnSeconds: 480, barHeight: 13, boss: true, hold: true, dailyBoss: true },
+  rivalHermit: { label: 'Rival hermit crab', level: 4, drops: ['shellBits', 'driftwood'], health: 70, attack: 9, defense: 4, attackInterval: 1.4, windup: 0.5, speed: 5.0, radius: 0.95, temperament: 'aggressive', sightRange: 8, experience: 50, pearlChance: 0.15, respawnSeconds: 120, barHeight: 2.6, ownShell: 'cone' },
   giantLobster: { label: 'Giant lobster', level: 11, health: 1040, attack: 30, defense: 8, attackInterval: 2.6, windup: 1.2, speed: 3.2, radius: 3.0, temperament: 'aggressive', sightRange: 0, telegraph: { reach: 4.4, radius: 3.0 }, experience: 800, pearlChance: 1, pearlCount: 2, respawnSeconds: MINIBOSS_RESPAWN_SECONDS, barHeight: 7.5, boss: true, reef: true },
 };
 
@@ -33,13 +38,13 @@ const WANDER_RADIUS = 6;
 const REPATH_SECONDS = 0.5;
 const DEATH_SINK_SECONDS = 1.7;
 const PACK_ALERT_RANGE = 12;
-const STRIKE_SOUNDS = { cockroach: 'crabClatter', cook: 'hitThud', rat: 'crabClatter', shipCat: 'hitThud', sandHopper: 'hopperJump', shoreCrab: 'crabClatter', gull: 'wingFlap', moray: 'crabClatter', octopus: 'fishPlop', mantisShrimp: 'clawSnap', giantLobster: 'crabClatter' };
+const STRIKE_SOUNDS = { cockroach: 'crabClatter', cook: 'hitThud', rat: 'crabClatter', shipCat: 'hitThud', sandHopper: 'hopperJump', shoreCrab: 'crabClatter', gull: 'wingFlap', moray: 'crabClatter', octopus: 'fishPlop', mantisShrimp: 'clawSnap', giantLobster: 'crabClatter', rivalHermit: 'crabClatter' };
 const IDLE_SOUNDS = { sandHopper: { name: 'hopperChirp', perSecond: 0.12 }, gull: { name: 'gullCall', perSecond: 0.06 } };
 const ENEMY_STRIKE_REACH = 1.9;
 const OUT_OF_REACH_RESET_SECONDS = 1;
 const PACK_SPREAD = 3.5;
 const HURT_SECONDS = 0.45;
-const KNOCKBACK_BY_KIND = { cockroach: 0.3, cook: 0, rat: 0.2, shipCat: 0, sandHopper: 0.6, shoreCrab: 0.25, gull: 0.1, moray: 0, octopus: 0.15, mantisShrimp: 0.4, giantLobster: 0 };
+const KNOCKBACK_BY_KIND = { cockroach: 0.3, cook: 0, rat: 0.2, shipCat: 0, sandHopper: 0.6, shoreCrab: 0.25, gull: 0.1, moray: 0, octopus: 0.15, mantisShrimp: 0.4, giantLobster: 0, rivalHermit: 0.25 };
 const MIN_PICK_RADIUS_PIXELS = 40;
 const PICK_BODY_MARGIN = 1.25;
 const pickEdge = new THREE.Vector3();
@@ -77,6 +82,14 @@ const GULL_CIRCLE_ALTITUDE = 30;
 const GULL_FLIGHT_SPEED = 16;
 const GULL_LANDING_OFFSET = 6;
 const CREATURE_SCALE = { sandHopper: 1, shoreCrab: 1, gull: 1 };
+const RIVAL_HERMIT_SCALE = 0.95;
+const RIVAL_CULL_RADIUS = 4;
+const RIVAL_HERMIT_TINT = [0.45, 0.6, 1.0];
+const RIVAL_GROUND = new THREE.Vector3(0, 1, 0);
+const LOOT_WEAPON_SCALE = { shoreCrab: 1.2, giantLobster: 0.9 };
+const LOOT_WEAPON_SPLAY = 0.5;
+const LOOT_WEAPON_LIFT = 0.15;
+const LOOT_SHELL_FIT = { octopus: { size: 0.18, position: [0.16, 0.22, 0.02], rotation: [0.2, 0.9, 1.1] } };
 
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 
@@ -422,6 +435,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       const enemy = { id: nextId++, kind: entry.kind, definition: ENEMY_KINDS[entry.kind], entry, slot: list.filter((other) => other.kind === entry.kind).length, respawnTimer: 0, pack: null };
       enemy.bar = createBar(enemy);
       if (entry.kind === 'gull') enemy.model = createGullModel(scene, quality);
+      if (entry.kind === 'rivalHermit') enemy.hermit = createHermit(scene, quality, SHELLS[ENEMY_KINDS.rivalHermit.ownShell].look, { crabModel: 'helper', scale: RIVAL_HERMIT_SCALE, bodyTint: RIVAL_HERMIT_TINT });
       if (creatureAssetAvailable(entry.kind)) {
         enemy.creature = createCreature(entry.kind, quality);
         enemy.modelScale = modelScale(entry.kind, enemy.creature);
@@ -994,6 +1008,94 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     }
   }
 
+  const lootMaterials = new Map();
+  function lootMaterial(category, kind) {
+    const key = `${category}:${kind}`;
+    if (!lootMaterials.has(key)) {
+      const base = applySeaside(new THREE.MeshStandardMaterial(), { chromaticCaustics: quality.chromaticCaustics, wetDarkening: 0.5, wetRoughness: 0.1 });
+      lootMaterials.set(key, category === 'shell' ? dressShellMaterial(kind, base) : dressWeaponMaterial(kind, base));
+    }
+    return lootMaterials.get(key);
+  }
+
+  function dressLoot(enemy) {
+    const loot = enemy.loot || {};
+    const shownKey = `${loot.shell ? loot.shell.kind : ''}|${loot.big ? loot.big.kind : ''}|${loot.small ? loot.small.kind : ''}`;
+    if (enemy.lootShown === shownKey) return;
+    enemy.lootShown = shownKey;
+    if (enemy.hermit) {
+      enemy.hermit.setShell(SHELLS[loot.shell ? loot.shell.kind : enemy.definition.ownShell].look);
+      enemy.hermit.setClawWeapon(loot.big ? loot.big.kind : null, loot.small ? loot.small.kind : null);
+      return;
+    }
+    for (const part of enemy.lootParts || []) part.removeFromParent();
+    enemy.lootParts = [];
+    if (!enemy.creature) return;
+    for (const which of ['big', 'small']) {
+      const item = loot[which];
+      const hand = enemy.creature.hands && enemy.creature.hands[which];
+      if (!item || !hand || !weaponModelAvailable(item.kind)) continue;
+      const weapon = buildHeldWeapon(item.kind, lootMaterial('claws', item.kind), hand.length, hand.length * (LOOT_WEAPON_SCALE[enemy.kind] || 1));
+      const holder = new THREE.Group();
+      holder.userData.hand = hand;
+      holder.add(weapon);
+      holder.updateMatrixWorld(true);
+      const reachDirection = new THREE.Box3().setFromObject(weapon).getCenter(new THREE.Vector3()).normalize();
+      holder.userData.pointing = new THREE.Quaternion().setFromUnitVectors(reachDirection, new THREE.Vector3(hand.side * LOOT_WEAPON_SPLAY, LOOT_WEAPON_LIFT, 1).normalize());
+      scene.add(holder);
+      enemy.lootParts.push(holder);
+    }
+    const fit = LOOT_SHELL_FIT[enemy.kind];
+    if (loot.shell && fit && shellModelAvailable(SHELLS[loot.shell.kind].look.model)) {
+      const model = SHELLS[loot.shell.kind].look.model;
+      const shell = buildShellModel(model, lootMaterial('shell', model));
+      shell.scale.setScalar(fit.size * enemy.creature.length);
+      shell.position.set(fit.position[0] * enemy.creature.length, fit.position[1] * enemy.creature.height, fit.position[2] * enemy.creature.length);
+      shell.rotation.set(...fit.rotation);
+      enemy.creature.object.add(shell);
+      enemy.lootParts.push(shell);
+    }
+  }
+
+  const handWorld = new THREE.Vector3();
+  const bodyTurn = new THREE.Quaternion();
+  function holdLootWeapons(enemy) {
+    if (!enemy.creature || !enemy.lootParts || !enemy.lootParts.length) return;
+    const { object } = enemy.creature;
+    object.updateMatrixWorld(true);
+    object.getWorldQuaternion(bodyTurn);
+    for (const part of enemy.lootParts) {
+      const { hand, pointing } = part.userData;
+      if (!hand) continue;
+      part.visible = object.visible;
+      hand.bone.getWorldPosition(handWorld);
+      part.position.copy(handWorld);
+      part.quaternion.copy(bodyTurn).multiply(pointing);
+      part.scale.setScalar(object.scale.x);
+    }
+  }
+
+  const viewFrustum = new THREE.Frustum();
+  const viewMatrix = new THREE.Matrix4();
+  const rivalCullSphere = new THREE.Sphere(new THREE.Vector3(), RIVAL_CULL_RADIUS);
+  function renderRivalHermit(enemy, time) {
+    const crab = enemy.hermit;
+    rivalCullSphere.center.set(enemy.x, enemy.y, enemy.z);
+    crab.root.visible = enemy.state !== 'dead' && viewFrustum.intersectsSphere(rivalCullSphere);
+    if (!crab.root.visible) return;
+    const deltaTime = enemy.lastRenderTime === undefined ? 0 : Math.min(0.1, Math.max(0, time - enemy.lastRenderTime));
+    enemy.lastRenderTime = time;
+    if (enemy.strike > 0.95 && !enemy.strikeShown) crab.playAttack(enemy.strikesMade % 2 ? 'small' : 'big');
+    enemy.strikeShown = enemy.strike > 0.95;
+    if (enemy.hurt > 0.95 && !enemy.hurtShown) crab.playHurt(0.6, 0);
+    enemy.hurtShown = enemy.hurt > 0.95;
+    const dying = enemy.state === 'dying';
+    if (dying && !enemy.deathShown) crab.playDeath();
+    if (!dying && enemy.deathShown) crab.resetPose();
+    enemy.deathShown = dying;
+    crab.update(deltaTime, { x: enemy.x, y: enemy.y - deathSink(enemy) * 0.8, z: enemy.z, heading: enemy.heading, speed: enemy.motion * enemy.definition.speed, working: false, groundNormal: RIVAL_GROUND });
+  }
+
   function placeInstance(mesh, slot, enemy, matrix) {
     mesh.setMatrixAt(slot, enemy.state === 'dead' ? hidden : matrix);
     setFlash(mesh, slot, flashFor(enemy));
@@ -1279,6 +1381,8 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
 
   function render(time, camera, playerTargetId, viewer) {
     const placedLabels = [];
+    viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    viewFrustum.setFromProjectionMatrix(viewMatrix);
     for (const enemy of list) {
       if (enemy.kind === 'sandHopper') renderHopper(enemy, time);
       else if (enemy.kind === 'shoreCrab') renderShoreCrab(enemy, time);
@@ -1291,6 +1395,9 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       else if (enemy.kind === 'shipCat') renderCat(enemy, time);
       else if (enemy.kind === 'cockroach') renderCockroach(enemy, time);
       else if (enemy.kind === 'cook') renderCook(enemy, time);
+      else if (enemy.kind === 'rivalHermit') renderRivalHermit(enemy, time);
+      dressLoot(enemy);
+      holdLootWeapons(enemy);
       const restText = enemy.state === 'dead' && enemy.definition.dailyBoss && enemy.home && Math.hypot(enemy.home.x - camera.position.x, enemy.home.z - camera.position.z) < RESTING_LABEL_DISTANCE ? bossReturnText(enemy.kind) : null;
       const flyingHigh = enemy.definition.flies && enemy.altitude > 6;
       const inFight = alive(enemy) && (enemy.health < enemy.definition.health || engaged(enemy) || enemy.id === playerTargetId) && !flyingHigh;
@@ -1303,13 +1410,13 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       enemy.bar.box.classList.toggle('resting', Boolean(restText));
       enemy.bar.box.classList.toggle('name-only', !inFight && !restText);
       if (onScreen) {
-        const difficulty = restText ? '' : `difficulty-${difficultyOf(enemy.definition.level, viewer.level)}`;
+        const difficulty = restText ? '' : `difficulty-${difficultyOf(levelOf(enemy), viewer.level)}`;
         if (enemy.bar.difficulty !== difficulty) {
           if (enemy.bar.difficulty) enemy.bar.name.classList.remove(enemy.bar.difficulty);
           if (difficulty) enemy.bar.name.classList.add(difficulty);
           enemy.bar.difficulty = difficulty;
         }
-        const nameText = restText || enemy.definition.label;
+        const nameText = restText || labelOf(enemy);
         if (enemy.bar.name.textContent !== nameText) {
           enemy.bar.name.textContent = nameText;
           enemy.bar.halfWidth = 0;
@@ -1355,6 +1462,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
   function spawn(kind, x, z, which = 0) {
     const enemy = list.filter((candidate) => candidate.kind === kind)[which];
     if (!enemy) return null;
+    enemy.loot = null;
     place(enemy, { x, z });
     return enemy;
   }

@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { attackOf, defenseOf } from './looting.js';
 import { createHermit } from './hermit.js';
 import { RESOURCE_TYPES, stackLimitOf } from './resources.js';
 import { BURROW_LAYER, BURROW_ORIGIN } from './burrow.js';
@@ -81,8 +82,8 @@ const hitDamage = (attack, defense) => Math.max(1, Math.round(attack - defense /
 
 export function expectsToWin(helper, enemy) {
   const stats = helperStats(helper);
-  const helperPerSecond = hitDamage(stats.attack, enemy.definition.defense || 0) / stats.attackInterval;
-  const enemyPerSecond = hitDamage(enemy.definition.attack, stats.defense) / enemy.definition.attackInterval;
+  const helperPerSecond = hitDamage(stats.attack, defenseOf(enemy)) / stats.attackInterval;
+  const enemyPerSecond = hitDamage(attackOf(enemy), stats.defense) / enemy.definition.attackInterval;
   return (enemy.health / helperPerSecond) * WIN_MARGIN < helper.health / enemyPerSecond;
 }
 
@@ -282,7 +283,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       helper.attackAnimPending = true;
       logHelperHit(helper, target, stats);
       (target.assistingHelperIds ||= new Set()).add(helper.id);
-      enemies.damage(target, hitDamage(stats.attack, target.definition.defense || 0), time, helper, { provoke: false });
+      enemies.damage(target, hitDamage(stats.attack, defenseOf(target)), time, helper, { provoke: false });
       return;
     }
     helper.fightTargetId = null;
@@ -496,7 +497,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   }
 
   function inDanger(helper, enemy) {
-    const nextHit = hitDamage(enemy.definition.attack, helperStats(helper).defense);
+    const nextHit = hitDamage(attackOf(enemy), helperStats(helper).defense);
     return helper.health <= Math.max(helperMaxHealth(helper) * FLEE_HEALTH_SHARE, nextHit * 1.2);
   }
 
@@ -541,7 +542,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     onSound('shellClonk', helper);
     helper.attackAnimPending = true;
     logHelperHit(helper, enemy, stats);
-    const killed = enemies.damage(enemy, hitDamage(stats.attack, enemy.definition.defense || 0), time, helper, { provoke: false });
+    const killed = enemies.damage(enemy, hitDamage(stats.attack, defenseOf(enemy)), time, helper, { provoke: false });
     if (killed) helper.fightTargetId = null;
   }
 
@@ -608,10 +609,10 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       if (helper.biteTimer <= 0) {
         helper.biteTimer = threat.enemy.definition.attackInterval;
         const defense = helperStats(helper).defense;
-        const damage = hitDamage(threat.enemy.definition.attack, defense);
+        const damage = hitDamage(attackOf(threat.enemy), defense);
         helper.health -= damage;
         helper.hurtAnimPending = true;
-        onLog('helperCombat', `${threat.enemy.definition.label} hits ${nameOf(helper)} for ${damage} — attack ${threat.enemy.definition.attack}, shell ${defense} blocks ${Math.min(threat.enemy.definition.attack - 1, defense / 2)} · HP ${Math.max(0, Math.ceil(helper.health))}/${helperMaxHealth(helper)}`);
+        onLog('helperCombat', `${threat.enemy.definition.label} hits ${nameOf(helper)} for ${damage} — attack ${attackOf(threat.enemy)}, shell ${defense} blocks ${Math.min(attackOf(threat.enemy) - 1, defense / 2)} · HP ${Math.max(0, Math.ceil(helper.health))}/${helperMaxHealth(helper)}`);
         onSound('shellClonk', helper);
         if (helper.health <= 0) {
           knockedOut(helper, threat.enemy);
@@ -896,7 +897,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   const nameOf = (helper) => `Helper ${list.indexOf(helper) + 1}`;
 
   function logHelperHit(helper, enemy, stats) {
-    const defense = enemy.definition.defense || 0;
+    const defense = defenseOf(enemy);
     onLog('helperCombat', `${nameOf(helper)} hits ${enemy.definition.label} for ${hitDamage(stats.attack, defense)} — attack ${stats.attack}, its armour ${defense} blocks ${Math.min(stats.attack - 1, defense / 2)}`);
   }
 

@@ -52,7 +52,7 @@ export function createMapView(root, { world, fog, halfSize, waterLevel, cameraYa
     if (event.target === overlay) onClose();
   });
   const legend = element('div', 'map-legend', side);
-  for (const [className, text] of [['you', 'You'], ['door', 'Burrow exits'], ['remains', 'Your remains'], ['rack', 'Drying rack'], ['boss', 'Boss lair']]) {
+  for (const [className, text] of [['you', 'You'], ['door', 'Burrow exits'], ['remains', 'Your remains'], ['looter', 'Stolen gear'], ['rack', 'Drying rack'], ['boss', 'Boss lair']]) {
     const entry = element('span', 'map-legend-entry', legend);
     element('span', `map-key ${className}`, entry);
     element('span', '', entry, text);
@@ -317,6 +317,20 @@ export function createMapView(root, { world, fog, halfSize, waterLevel, cameraYa
     context.stroke();
   }
 
+  function drawLooter(point) {
+    const pixel = toPixel(point);
+    marker(point, 11, '#2a1a1a', '#f2c94c');
+    context.fillStyle = '#f2c94c';
+    context.beginPath();
+    for (let corner = 0; corner < 10; corner++) {
+      const radius = corner % 2 ? 3 : 7;
+      const angle = -Math.PI / 2 + (corner * Math.PI) / 5;
+      context.lineTo(pixel.x + Math.cos(angle) * radius, pixel.y + Math.sin(angle) * radius);
+    }
+    context.closePath();
+    context.fill();
+  }
+
   function drawEntrance(point) {
     marker(point, 11, '#ffd23c', '#3a2410');
     marker(point, 5, '#2a1a10', '#2a1a10');
@@ -413,7 +427,7 @@ export function createMapView(root, { world, fog, halfSize, waterLevel, cameraYa
     return { center: { x: (low.x + high.x) / 2, z: (low.z + high.z) / 2 }, extent: Math.min(halfSize * 1.05, Math.max(MIN_EXTENT, size * 1.25 + 8)) };
   }
 
-  function draw({ player = null, playerHeading = 0, entrances = [], remains = [], rack = null, bosses = [] }) {
+  function draw({ player = null, playerHeading = 0, entrances = [], remains = [], looters = [], rack = null, bosses = [] }) {
     const frame = frameExplored([player, ...entrances, ...remains, rack].filter(Boolean));
     center = frame.center;
     extent = frame.extent;
@@ -449,6 +463,7 @@ export function createMapView(root, { world, fog, halfSize, waterLevel, cameraYa
     context.fillRect(0, 0, CANVAS_PIXELS, CANVAS_PIXELS);
     context.drawImage(revealedCanvas, 0, 0);
     for (const point of remains) drawRemains(point);
+    for (const point of looters) if (revealed(point)) drawLooter(point);
     for (const point of entrances) drawEntrance(point);
     if (player) drawPlayer(player, playerHeading);
     drawCompass();

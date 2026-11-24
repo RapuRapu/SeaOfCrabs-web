@@ -116,6 +116,20 @@ export function buildShellModel(kind, material) {
 
 export const crabAssetLoaded = (model = 'player') => Boolean(loadedCrabs[model]);
 
+export function buildHeldWeapon(kind, material, handLength, referenceHandLength = handLength) {
+  const fit = WEAPON_MODEL_FIT[kind];
+  const scale = (referenceHandLength * fit.length) / WEAPON_MODEL_LENGTH;
+  const mesh = new THREE.Mesh(weaponModels.get(kind).geometry, material);
+  mesh.castShadow = true;
+  mesh.position.set(-fit.anchor[0], -fit.anchor[1], -fit.anchor[2]).multiplyScalar(scale);
+  mesh.scale.setScalar(scale);
+  const weapon = new THREE.Group();
+  weapon.rotation.set(...fit.rotation);
+  weapon.position.set(0, handLength * fit.along, 0);
+  weapon.add(mesh);
+  return weapon;
+}
+
 export function buildAssetRig({ bodyMaterial, clawMaterial, abdomenMaterial, rearMaterial, crabModel = 'player' }) {
   const model = cloneSkinned(loadedCrabs[crabModel]);
   model.scale.setScalar(MODEL_SCALE);
@@ -154,19 +168,8 @@ export function buildAssetRig({ bodyMaterial, clawMaterial, abdomenMaterial, rea
     if (heldWeapons[which]) heldWeapons[which].removeFromParent();
     heldWeapons[which] = null;
     if (!kind || !weaponModels.has(kind)) return;
-    const fit = WEAPON_MODEL_FIT[kind];
-    const hand = bones[`claw_${which}_3`];
-    const handLength = bones[`claw_${which}_tip`].position.length();
-    const scale = (bones.claw_big_tip.position.length() * fit.length) / WEAPON_MODEL_LENGTH;
-    const mesh = new THREE.Mesh(weaponModels.get(kind).geometry, material);
-    mesh.castShadow = true;
-    mesh.position.set(-fit.anchor[0], -fit.anchor[1], -fit.anchor[2]).multiplyScalar(scale);
-    mesh.scale.setScalar(scale);
-    const weapon = new THREE.Group();
-    weapon.rotation.set(...fit.rotation);
-    weapon.position.set(0, handLength * fit.along, 0);
-    weapon.add(mesh);
-    hand.add(weapon);
+    const weapon = buildHeldWeapon(kind, material, bones[`claw_${which}_tip`].position.length(), bones.claw_big_tip.position.length());
+    bones[`claw_${which}_3`].add(weapon);
     heldWeapons[which] = weapon;
   }
 
