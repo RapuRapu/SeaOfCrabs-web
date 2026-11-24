@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { levelOf, labelOf } from './looting.js';
+import { levelOf, labelOf, isLooter } from './looting.js';
 import { createHermit } from './hermit.js';
 import { SHELLS } from './gear.js';
 import { buildHeldWeapon, weaponModelAvailable, dressWeaponMaterial, buildShellModel, dressShellMaterial, shellModelAvailable } from './hermitAsset.js';
@@ -7,7 +7,7 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { applySeaside } from './seaside.js';
 import { random } from './random.js';
 import { difficultyOf } from './progression.js';
-import { creatureAssetAvailable, createCreature } from './creatureAssets.js';
+import { creatureAssetAvailable, createCreature, OCTOPUS_SHELL_SPOT } from './creatureAssets.js';
 import { buildCockroachGeometry, buildCookLegGeometry, buildCleaverGeometry, LINE_TELEGRAPH_FRAGMENT_GLSL, buildRatGeometry, buildCatGeometry, buildMorayGeometry, buildOctopusGeometry, buildMantisGeometry, buildLobsterBodyGeometry, buildLobsterClawGeometry, TELEGRAPH_VERTEX_GLSL, TELEGRAPH_FRAGMENT_GLSL, INK_FRAGMENT_GLSL } from './reefCreatures.js';
 
 export const PLAYER_BODY_RADIUS = 0.9;
@@ -84,12 +84,16 @@ const GULL_LANDING_OFFSET = 6;
 const CREATURE_SCALE = { sandHopper: 1, shoreCrab: 1, gull: 1 };
 const RIVAL_HERMIT_SCALE = 0.95;
 const RIVAL_CULL_RADIUS = 4;
+const RIVAL_WEAPON_SCALE = 1.5;
+const LOOTER_LABEL_LIFT = 1.35;
+const LOOT_SHELL_BRIGHTNESS = 1.35;
+const LOOT_WEAPON_LIFT_BY_KIND = { giantLobster: 0.2 };
 const RIVAL_HERMIT_TINT = [0.45, 0.6, 1.0];
 const RIVAL_GROUND = new THREE.Vector3(0, 1, 0);
 const LOOT_WEAPON_SCALE = { shoreCrab: 1.2, giantLobster: 0.9 };
 const LOOT_WEAPON_SPLAY = 0.5;
 const LOOT_WEAPON_LIFT = 0.15;
-const LOOT_SHELL_FIT = { octopus: { size: 0.18, position: [0.16, 0.22, 0.02], rotation: [0.2, 0.9, 1.1] } };
+const LOOT_SHELL_FIT = { octopus: { size: 0.18, position: OCTOPUS_SHELL_SPOT, rotation: [0.2, 0.9, 1.1] } };
 
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 
@@ -435,7 +439,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       const enemy = { id: nextId++, kind: entry.kind, definition: ENEMY_KINDS[entry.kind], entry, slot: list.filter((other) => other.kind === entry.kind).length, respawnTimer: 0, pack: null };
       enemy.bar = createBar(enemy);
       if (entry.kind === 'gull') enemy.model = createGullModel(scene, quality);
-      if (entry.kind === 'rivalHermit') enemy.hermit = createHermit(scene, quality, SHELLS[ENEMY_KINDS.rivalHermit.ownShell].look, { crabModel: 'helper', scale: RIVAL_HERMIT_SCALE, bodyTint: RIVAL_HERMIT_TINT });
+      if (entry.kind === 'rivalHermit') enemy.hermit = createHermit(scene, quality, SHELLS[ENEMY_KINDS.rivalHermit.ownShell].look, { crabModel: 'helper', scale: RIVAL_HERMIT_SCALE, bodyTint: RIVAL_HERMIT_TINT, weaponScale: RIVAL_WEAPON_SCALE });
       if (creatureAssetAvailable(entry.kind)) {
         enemy.creature = createCreature(entry.kind, quality);
         enemy.modelScale = modelScale(entry.kind, enemy.creature);
@@ -1014,6 +1018,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     if (!lootMaterials.has(key)) {
       const base = applySeaside(new THREE.MeshStandardMaterial(), { chromaticCaustics: quality.chromaticCaustics, wetDarkening: 0.5, wetRoughness: 0.1 });
       lootMaterials.set(key, category === 'shell' ? dressShellMaterial(kind, base) : dressWeaponMaterial(kind, base));
+      if (category === 'shell') lootMaterials.get(key).color.multiplyScalar(LOOT_SHELL_BRIGHTNESS);
     }
     return lootMaterials.get(key);
   }
@@ -1041,7 +1046,8 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       holder.add(weapon);
       holder.updateMatrixWorld(true);
       const reachDirection = new THREE.Box3().setFromObject(weapon).getCenter(new THREE.Vector3()).normalize();
-      holder.userData.pointing = new THREE.Quaternion().setFromUnitVectors(reachDirection, new THREE.Vector3(hand.side * LOOT_WEAPON_SPLAY, LOOT_WEAPON_LIFT, 1).normalize());
+      const lift = LOOT_WEAPON_LIFT_BY_KIND[enemy.kind] ?? LOOT_WEAPON_LIFT;
+      holder.userData.pointing = new THREE.Quaternion().setFromUnitVectors(reachDirection, new THREE.Vector3(hand.side * LOOT_WEAPON_SPLAY, lift, 1).normalize());
       scene.add(holder);
       enemy.lootParts.push(holder);
     }
@@ -1068,8 +1074,9 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       const { hand, pointing } = part.userData;
       if (!hand) continue;
       part.visible = object.visible;
-      hand.bone.getWorldPosition(handWorld);
-      part.position.copy(handWorld);
+      part.position.set(0, 0, 0);
+      for (const gripBone of hand.gripBones) part.position.add(gripBone.getWorldPosition(handWorld));
+      part.position.divideScalar(hand.gripBones.length);
       part.quaternion.copy(bodyTurn).multiply(pointing);
       part.scale.setScalar(object.scale.x);
     }
@@ -1130,7 +1137,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     transform.updateMatrix();
     if (enemy.creature) {
       octopusMesh.setMatrixAt(enemy.slot, hidden);
-      showCreature(enemy, { time, motion: enemy.motion, lunge, swell, fall: deathFall(enemy) });
+      showCreature(enemy, { time, motion: enemy.motion, lunge, swell, fall: deathFall(enemy), holdingShell: Boolean(enemy.loot && enemy.loot.shell) });
       return;
     }
     placeInstance(octopusMesh, enemy.slot, enemy, transform.matrix);
@@ -1404,7 +1411,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       const nearViewer = alive(enemy) && !flyingHigh && Math.hypot(enemy.x - viewer.x, enemy.z - viewer.z) < NAME_VISIBLE_DISTANCE;
       const barVisible = (inFight || nearViewer || Boolean(restText)) && viewer.isRevealed(enemy.x, enemy.z);
       if (restText) labelPoint.set(enemy.home.x, world.heightAt(enemy.home.x, enemy.home.z) + Math.min(enemy.definition.barHeight, 6), enemy.home.z).project(camera);
-      else if (barVisible) labelPoint.set(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight, enemy.z).project(camera);
+      else if (barVisible) labelPoint.set(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight * (isLooter(enemy) ? LOOTER_LABEL_LIFT : 1), enemy.z).project(camera);
       const onScreen = barVisible && labelPoint.z < 1;
       enemy.bar.box.classList.toggle('hidden', !onScreen);
       enemy.bar.box.classList.toggle('resting', Boolean(restText));

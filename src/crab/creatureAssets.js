@@ -26,6 +26,8 @@ const MORAY_HEAD_LOWER = -0.35;
 const MANTIS_CROUCH = 0.8;
 const TINTED_KINDS = { moray: [2, 2, 2], octopus: [0.6, 0.62, 0.9] };
 const OCTOPUS_ARM_CURL = 0.8;
+const OCTOPUS_HOLD_CURL = [1.1, 1.3, 1.4];
+export const OCTOPUS_SHELL_SPOT = [0.16, 0.22, 0.02];
 
 export async function loadCreatureAssets() {
   const [entries] = await Promise.all([Promise.all(Object.entries(CREATURE_BYTES).map(async ([kind, bytes]) => [kind, (await parseModel(bytes)).scene])), loadCookAsset()]);
@@ -192,8 +194,18 @@ export function createCreature(kind, quality) {
     if (head) head.pose(0, 0.1 * Math.sin(time * 0.7), -lunge * 0.35 + crouch * 0.4);
   }
 
-  function poseOctopus({ time, motion, lunge, swell, fall }) {
-    limbs.legs.concat(limbs.appendages).forEach((limb, index) => {
+  const octopusArms = limbs.legs.concat(limbs.appendages);
+  const shellSpot = new THREE.Vector3(length * OCTOPUS_SHELL_SPOT[0], limbs.height * OCTOPUS_SHELL_SPOT[1], length * OCTOPUS_SHELL_SPOT[2]);
+  const shellHoldingArm = kind === 'octopus' ? octopusArms.reduce((best, limb) => (limb.tip.distanceTo(shellSpot) < best.tip.distanceTo(shellSpot) ? limb : best), octopusArms[0]) : null;
+
+  function poseOctopus({ time, motion, lunge, swell, fall, holdingShell = false }) {
+    octopusArms.forEach((limb, index) => {
+      if (holdingShell && limb === shellHoldingArm) {
+        limb.joints[0].pose(OCTOPUS_HOLD_CURL[0] + 0.04 * Math.sin(time * 2), 0);
+        limb.joints[1].pose(OCTOPUS_HOLD_CURL[1], 0);
+        limb.joints[2].pose(OCTOPUS_HOLD_CURL[2], 0);
+        return;
+      }
       const phase = time * 2.2 + index * 1.3;
       const forward = limb.tip.z > 0 ? lunge : 0;
       const sway = (1 + motion) * OCTOPUS_ARM_CURL;
@@ -243,10 +255,14 @@ export function createCreature(kind, quality) {
   const posers = { shoreCrab: poseShoreCrab, sandHopper: poseHopper, gull: poseGull, cockroach: poseCockroach, rat: poseRat, shipCat: poseCat, octopus: poseOctopus, mantisShrimp: poseMantis, giantLobster: poseLobster, moray: poseMoray };
   const fingeredLimbs = new Set(fingers.map((finger) => bones[`${finger.name}_1`].parent.name.replace(/_(\d+|tip)$/, '')));
   const fingeredArms = arms.filter((arm) => fingeredLimbs.has(arm.name));
-  const grippingArms = (fingeredArms.length >= 2 ? fingeredArms : arms.filter((arm) => arm.tip.y <= limbs.height * 0.6)).sort((a, b) => a.side - b.side);
+  const reachOf = (arm) => arm.tip.distanceTo(bones[`${arm.name}_1`].getWorldPosition(new THREE.Vector3()));
+  const longestOnSide = (side) => arms.filter((arm) => arm.side === side && arm.tip.y <= limbs.height * 0.6).sort((a, b) => reachOf(b) - reachOf(a))[0];
+  const singleClaw = fingeredArms.length === 1 ? fingeredArms[0] : null;
+  const grippingArms = fingeredArms.length >= 2 ? fingeredArms.sort((a, b) => a.side - b.side) : singleClaw ? [singleClaw, longestOnSide(-singleClaw.side)].filter(Boolean) : [longestOnSide(-1), longestOnSide(1)].filter(Boolean);
   const handOf = (arm) => {
     const bone = bones[`${arm.name}_3`];
-    return { bone, side: arm.side, length: bones[`${arm.name}_tip`].position.length() };
+    const fingerTips = fingers.filter((finger) => bones[`${finger.name}_1`].parent.name.startsWith(`${arm.name}_`)).map((finger) => bones[`${finger.name}_tip`]);
+    return { bone, gripBones: [bones[`${arm.name}_tip`], ...fingerTips], side: arm.side, length: bones[`${arm.name}_tip`].position.length() };
   };
   const hands = grippingArms.length >= 2 ? { big: handOf(grippingArms[0]), small: handOf(grippingArms[grippingArms.length - 1]) } : null;
 

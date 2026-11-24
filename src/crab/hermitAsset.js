@@ -130,7 +130,7 @@ export function buildHeldWeapon(kind, material, handLength, referenceHandLength 
   return weapon;
 }
 
-export function buildAssetRig({ bodyMaterial, clawMaterial, abdomenMaterial, rearMaterial, crabModel = 'player' }) {
+export function buildAssetRig({ bodyMaterial, clawMaterial, abdomenMaterial, rearMaterial, crabModel = 'player', weaponScale = 1 }) {
   const model = cloneSkinned(loadedCrabs[crabModel]);
   model.scale.setScalar(MODEL_SCALE);
   model.updateMatrixWorld(true);
@@ -168,7 +168,7 @@ export function buildAssetRig({ bodyMaterial, clawMaterial, abdomenMaterial, rea
     if (heldWeapons[which]) heldWeapons[which].removeFromParent();
     heldWeapons[which] = null;
     if (!kind || !weaponModels.has(kind)) return;
-    const weapon = buildHeldWeapon(kind, material, bones[`claw_${which}_tip`].position.length(), bones.claw_big_tip.position.length());
+    const weapon = buildHeldWeapon(kind, material, bones[`claw_${which}_tip`].position.length(), bones.claw_big_tip.position.length() * weaponScale);
     bones[`claw_${which}_3`].add(weapon);
     heldWeapons[which] = weapon;
   }

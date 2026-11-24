@@ -371,7 +371,7 @@ function buildGearGlowParticles() {
   return { mesh, update };
 }
 
-export function createHermit(scene, quality, shellLook, { crabModel = 'player', scale = 1, bodyTint = null } = {}) {
+export function createHermit(scene, quality, shellLook, { crabModel = 'player', scale = 1, bodyTint = null, weaponScale = 1 } = {}) {
   const useAsset = crabAssetLoaded(crabModel);
   const baseColor = new THREE.Color(1, 1, 1);
   if (bodyTint) baseColor.setRGB(bodyTint[0], bodyTint[1], bodyTint[2], THREE.SRGBColorSpace);
@@ -413,7 +413,7 @@ export function createHermit(scene, quality, shellLook, { crabModel = 'player', 
   }
   tilt.add(body);
 
-  const assetRig = useAsset ? buildAssetRig({ bodyMaterial: material, clawMaterial, abdomenMaterial, rearMaterial, crabModel }) : null;
+  const assetRig = useAsset ? buildAssetRig({ bodyMaterial: material, clawMaterial, abdomenMaterial, rearMaterial, crabModel, weaponScale }) : null;
   const proceduralRig = useAsset ? null : buildProceduralRig(body, material, clawMaterial);
   if (assetRig) body.add(assetRig.object);
 
