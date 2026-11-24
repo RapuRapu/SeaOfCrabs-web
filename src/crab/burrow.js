@@ -1,4 +1,5 @@
 import { applyBurrowSurface } from './burrowSurface.js';
+import { createBurrowDecor } from './burrowDecor.js';
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
@@ -33,6 +34,7 @@ const PLAYER_CLEARANCE = 0.55;
 const STATION_BLOCK_RADIUS = 1.15;
 const DIG_SECONDS = 3;
 const SAND_SAMPLES_PER_CELL = 10;
+const COARSE_SAMPLES_PER_CELL = 3;
 const SAND_BLUR_CELLS = 0.6;
 const SAND_WARP_CELLS = 0.28;
 const SAND_SINK = 0.15;
@@ -246,7 +248,7 @@ const BLUR_TAPS = (() => {
 
 function buildSandChunkGeometry(firstColumn, firstRow, detailed) {
   const size = SAND_CHUNK_CELLS * BURROW_CELL;
-  const segments = detailed ? SAND_CHUNK_CELLS * SAND_SAMPLES_PER_CELL : SAND_CHUNK_CELLS;
+  const segments = SAND_CHUNK_CELLS * (detailed ? SAND_SAMPLES_PER_CELL : COARSE_SAMPLES_PER_CELL);
   const centerX = (firstColumn + (SAND_CHUNK_CELLS - 1) / 2 - CENTER) * BURROW_CELL;
   const centerZ = (firstRow + (SAND_CHUNK_CELLS - 1) / 2 - CENTER) * BURROW_CELL;
   const geometry = new THREE.PlaneGeometry(size, size, segments, segments).rotateX(-Math.PI / 2).translate(centerX, 0, centerZ).deleteAttribute('uv');
@@ -372,6 +374,7 @@ function setLayers(object, layers) {
 }
 
 export function createBurrow(scene, world, quality, labelParent, saved) {
+  let decor = null;
   const state = saved ? structuredClone(saved) : createEmptyBurrow();
   migrateLegacyGrid(state);
   let nextStationId = state.stations.reduce((highest, station) => Math.max(highest, station.id || 0), 0) + 1;
@@ -411,7 +414,16 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
 
   const interior = new THREE.Group();
   interior.position.set(BURROW_ORIGIN.x, BURROW_ORIGIN.y, BURROW_ORIGIN.z);
-  const floorMaterial = applyBurrowSurface(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96 }), 'floor', BURROW_ORIGIN.y, WALL_HEIGHT);
+  const solidMaskData = new Uint8Array(BURROW_SPAN * BURROW_SPAN);
+  const solidMaskTexture = new THREE.DataTexture(solidMaskData, BURROW_SPAN, BURROW_SPAN, THREE.RedFormat);
+  solidMaskTexture.magFilter = THREE.LinearFilter;
+  solidMaskTexture.minFilter = THREE.LinearFilter;
+  const solidMaskMapping = new THREE.Vector3(CENTER - BURROW_CELL_MIN + 0.5 - BURROW_ORIGIN.x / BURROW_CELL, CENTER - BURROW_CELL_MIN + 0.5 - BURROW_ORIGIN.z / BURROW_CELL, 1 / BURROW_CELL);
+  const floorMaterial = applyBurrowSurface(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.96 }), 'floor', BURROW_ORIGIN.y, WALL_HEIGHT, { texture: solidMaskTexture, mapping: solidMaskMapping });
+  function refreshSolidMask() {
+    for (let index = 0; index < solidMaskData.length; index++) solidMaskData[index] = dugCells.has(index) ? 0 : 255;
+    solidMaskTexture.needsUpdate = true;
+  }
   const floor = new THREE.Mesh(buildFloorGeometry(), floorMaterial);
   floor.receiveShadow = true;
   interior.add(floor);
@@ -531,7 +543,10 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     const filled = total / weight;
     const exitDistance = Math.hypot(x - (shaftCenter.x - BURROW_ORIGIN.x), z - (shaftCenter.z - BURROW_ORIGIN.z) - BURROW_CELL * 0.6);
     const exitRise = state.entranceClosed ? 0 : (EXIT_SAND_HEIGHT - WALL_HEIGHT) * (1 - THREE.MathUtils.smoothstep(exitDistance, BURROW_CELL * 0.9, BURROW_CELL * 2.3));
-    const rise = THREE.MathUtils.smoothstep(filled, 0.44, 0.76);
+    const lipBite = 0.09 * sandNoise(x * 1.9 + 11, z * 1.9 - 7);
+    const shaped = THREE.MathUtils.smoothstep(filled, 0.44, 0.76 + lipBite);
+    const hollow = 0.16 * Math.max(0, sandNoise(x * 0.9 - 4, z * 0.9 + 9)) * Math.sin(Math.PI * shaped);
+    const rise = Math.max(0, shaped - hollow);
     const clods = THREE.MathUtils.smoothstep(filled, 0.8, 1) * 0.16 * sandNoise(x * 1.7 + 5, z * 1.7 - 3);
     return rise * (WALL_HEIGHT + exitRise) * (1 + 0.08 * sandNoise(x * 0.45, z * 0.45)) + clods;
   }
@@ -567,6 +582,8 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
       }
       rebuildChunk(chunk);
     }
+    refreshSolidMask();
+    decor?.rebuild();
   }
 
   function rebuildChunk(chunk) {
@@ -592,9 +609,21 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
       color.multiplyScalar(Math.max(0.45, 1 - 0.13 * Math.max(0, depth - 1)));
       colors.setXYZ(index, color.r, color.g, color.b);
     }
+    const spacing = BURROW_CELL / (chunk.detailed ? SAND_SAMPLES_PER_CELL : COARSE_SAMPLES_PER_CELL);
+    const heightByPoint = new Map();
+    for (let index = 0; index < positions.count; index++) heightByPoint.set(`${Math.round(positions.getX(index) / spacing)},${Math.round(positions.getZ(index) / spacing)}`, positions.getY(index) + SAND_SINK);
+    const heightNear = (x, z) => heightByPoint.get(`${Math.round(x / spacing)},${Math.round(z / spacing)}`) ?? sandHeightAt(x, z);
+    const normals = sandGeometry.attributes.normal;
+    const normal = new THREE.Vector3();
+    for (let index = 0; index < positions.count; index++) {
+      const x = positions.getX(index);
+      const z = positions.getZ(index);
+      normal.set(heightNear(x - spacing, z) - heightNear(x + spacing, z), spacing * 2, heightNear(x, z - spacing) - heightNear(x, z + spacing)).normalize();
+      normals.setXYZ(index, normal.x, normal.y, normal.z);
+    }
     positions.needsUpdate = true;
     colors.needsUpdate = true;
-    sandGeometry.computeVertexNormals();
+    normals.needsUpdate = true;
     sandGeometry.computeBoundingSphere();
   }
 
@@ -1108,12 +1137,25 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
     updateChunks(Math.min(0.1, Math.max(0, time - (lastUpdateTime ?? time))));
     lastUpdateTime = time;
     shaft.pool.material.opacity = 0.3 + 0.06 * Math.sin(time * 1.3);
+    decor?.update(time, underground && !state.entranceClosed);
   }
 
   function attachStations(workshopModel) {
     for (const station of state.stations) addStationMesh(station, workshopModel);
   }
 
+  decor = createBurrowDecor(interior, {
+    burrowCell: BURROW_CELL,
+    wallHeight: WALL_HEIGHT,
+    density: quality.density,
+    isDug,
+    insideGrid,
+    stationAt,
+    sandHeightAt,
+    cellLocal: (column, row) => { const center = cellCenter(column, row); return { x: center.x - BURROW_ORIGIN.x, z: center.z - BURROW_ORIGIN.z }; },
+    cellRange: { min: BURROW_CELL_MIN, max: BURROW_CELL_MAX },
+    shaftLocal: { x: shaftCenter.x - BURROW_ORIGIN.x, z: shaftCenter.z - BURROW_ORIGIN.z },
+  });
   setLayers(interior, [BURROW_LAYER]);
   rebuildWalls();
   if (state.entrance) setEntrance(state.entrance.x, state.entrance.z, world.heightAt(state.entrance.x, state.entrance.z));
@@ -1121,6 +1163,7 @@ export function createBurrow(scene, world, quality, labelParent, saved) {
   return {
     state,
     interior,
+    decorCounts: () => decor.counts(),
     entranceGroup,
     space,
     shaftCenter,

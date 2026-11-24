@@ -2677,6 +2677,8 @@ function simulate(deltaTime) {
   }
 }
 
+const UNDERGROUND_PORTRAIT_ZOOM = 0.78;
+
 function portraitLead() {
   const extraHalfTangent = Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) - Math.tan(THREE.MathUtils.degToRad(LANDSCAPE_FIELD_OF_VIEW / 2));
   return Math.max(0, extraHalfTangent) * cameraDistance * PORTRAIT_LEAD_SHARE;
@@ -2688,7 +2690,8 @@ function updateCamera(deltaTime, snap) {
   cameraFocus.x += (player.x - Math.sin(CAMERA_YAW) * lead - cameraFocus.x) * follow;
   cameraFocus.z += (player.z + Math.cos(CAMERA_YAW) * lead - cameraFocus.z) * follow;
   cameraFocus.y += (player.y + 0.6 - cameraFocus.y) * follow;
-  const viewDistance = cameraDistance * (1 + CAMERA_GROWTH_PER_MOLT * moltTotal());
+  const portraitZoom = underground && camera.aspect < 1 ? UNDERGROUND_PORTRAIT_ZOOM : 1;
+  const viewDistance = cameraDistance * (1 + CAMERA_GROWTH_PER_MOLT * moltTotal()) * portraitZoom;
   const horizontal = Math.cos(CAMERA_PITCH) * viewDistance;
   camera.position.set(cameraFocus.x + Math.sin(CAMERA_YAW) * horizontal, cameraFocus.y + Math.sin(CAMERA_PITCH) * viewDistance, cameraFocus.z - Math.cos(CAMERA_YAW) * horizontal);
   const minimumHeight = space().heightAt(camera.position.x, camera.position.z) + 2;
