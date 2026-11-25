@@ -17,6 +17,14 @@ const TRAVEL_TOP_PIXELS = 130;
 export function createHud(activeQualityName) {
   const root = element('div', '', document.body);
   root.id = 'hud';
+  root.addEventListener('click', (event) => {
+    const backdrop = event.target;
+    if (backdrop.classList.contains('workbench')) {
+      backdrop.querySelector('.workbench-close')?.click();
+    } else if (backdrop.classList.contains('pause-menu')) {
+      backdrop.querySelector('.resume')?.click();
+    }
+  });
 
   const topLeft = element('div', 'top-left', root);
   const pauseButton = element('button', 'pause-button', topLeft);

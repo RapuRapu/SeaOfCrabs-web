@@ -50,7 +50,7 @@
     #hud .burrow-buttons, #hud .mode-bar, #hud .hint, #hud .quick-slots { margin-bottom: var(--log-space); }
   }
   #hud .game-log .log-hint { opacity: 0.6; font-style: italic; }
-  #hud .game-log.expanded .log-lines { max-height: 46vh; overflow-y: auto; background: rgba(14, 20, 24, 0.94); }
+  #hud .game-log.expanded .log-lines { max-height: 46vh; max-height: 46dvh; overflow-y: auto; background: rgba(14, 20, 24, 0.94); }
   #hud .game-log .log-line { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #hud .game-log.expanded .log-line { display: block; padding: 1px 0; }
   #hud .game-log.expanded .log-lines { display: block; }
@@ -80,9 +80,9 @@
   #hud .pause-card .toggle-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 15px; }
   #hud .hint { position: absolute; left: 50%; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 8px); transform: translateX(-50%); width: min(78vw, 520px); text-align: center; font-size: 15px; padding: 8px 12px; border-radius: 10px; background: rgba(26, 34, 38, 0.8); transition: opacity 0.6s; }
   #hud .hint.hidden { opacity: 0; }
-  #hud .pause-menu { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(10, 14, 16, 0.55); pointer-events: auto; text-shadow: none; }
+  #hud .pause-menu { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; box-sizing: border-box; overflow-y: auto; padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: rgba(10, 14, 16, 0.55); pointer-events: auto; text-shadow: none; }
   #hud .pause-menu.visible { display: flex; }
-  #hud .pause-card { display: flex; flex-direction: column; gap: 12px; min-width: 240px; padding: 20px 22px; border-radius: 16px; background: rgba(30, 40, 44, 0.96); border: 2px solid #c9b48a; text-align: center; }
+  #hud .pause-card { margin: auto; max-height: 100%; overflow-y: auto; box-sizing: border-box; flex: none; display: flex; flex-direction: column; gap: 12px; min-width: 240px; padding: 20px 22px; border-radius: 16px; background: rgba(30, 40, 44, 0.96); border: 2px solid #c9b48a; text-align: center; }
   #hud .pause-title { font-size: 24px; font-weight: bold; letter-spacing: 1px; }
   #hud .pause-card button { padding: 10px 14px; border-radius: 12px; border: 1px solid rgba(255, 244, 214, 0.4); background: rgba(70, 86, 92, 0.9); font-size: 17px; }
   #hud .pause-card .resume { background: #c98a2a; font-weight: bold; }
@@ -97,9 +97,9 @@
   #hud .goal.action { pointer-events: auto; cursor: pointer; background: #c98a2a; border: 1px solid #ffe2a8; font-weight: bold; animation: goal-pulse 1.6s ease-in-out infinite; }
   @keyframes goal-pulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 210, 120, 0.6); } 50% { box-shadow: 0 0 0 6px rgba(255, 210, 120, 0); } }
   #hud .goal.hidden { display: none; }
-  #hud .workbench { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; background: rgba(10, 14, 16, 0.45); pointer-events: auto; text-shadow: none; }
+  #hud .workbench { position: fixed; inset: 0; display: none; align-items: center; justify-content: center; box-sizing: border-box; overflow-y: auto; padding: max(8px, env(safe-area-inset-top)) max(8px, env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background: rgba(10, 14, 16, 0.45); pointer-events: auto; text-shadow: none; }
   #hud .workbench.visible { display: flex; }
-  #hud .workbench-card { display: flex; flex-direction: column; width: min(94vw, 460px); max-height: min(88vh, 620px); padding: 12px 14px 14px; border-radius: 16px; background: rgba(30, 40, 44, 0.97); border: 2px solid #c9b48a; }
+  #hud .workbench-card { display: flex; flex-direction: column; width: min(94vw, 460px); margin: auto; box-sizing: border-box; flex: none; max-height: min(88vh, 620px); max-height: min(100%, 620px); padding: 12px 14px 14px; border-radius: 16px; background: rgba(30, 40, 44, 0.97); border: 2px solid #c9b48a; }
   #hud .workbench-header { display: flex; align-items: center; justify-content: space-between; }
   #hud .workbench-title { font-size: 20px; font-weight: bold; }
   #hud .workbench-close { width: 36px; height: 36px; border-radius: 10px; border: 1px solid rgba(255, 244, 214, 0.4); background: rgba(70, 86, 92, 0.9); font-size: 17px; }
@@ -110,7 +110,7 @@
   #hud.panel-open .goal, #hud.panel-open .hint { visibility: hidden; }
   #hud .world-label { position: absolute; left: 0; top: 0; padding: 4px 10px; border-radius: 11px; background: rgba(201, 138, 42, 0.92); border: 1px solid #ffe2a8; font-size: 15px; font-weight: bold; white-space: nowrap; }
   #hud .world-label.hidden { display: none; }
-  @media (max-height: 500px) { #hud .workbench-card { padding: 8px 12px 10px; max-height: 94vh; } #hud .workbench-tabs { margin: 6px 0; } #hud .workbench-tabs button { padding: 5px 4px; } #hud .workbench .item { padding: 6px 10px; } #hud .workbench-title { font-size: 18px; } #hud .workbench-close { width: 32px; height: 32px; } #hud .workbench .item-name { font-size: 15px; } }
+  @media (max-height: 500px) { #hud .workbench-card { padding: 8px 12px 10px; max-height: 100%; } #hud .workbench-tabs { margin: 6px 0; } #hud .workbench-tabs button { padding: 5px 4px; } #hud .workbench .item { padding: 6px 10px; } #hud .workbench-title { font-size: 18px; } #hud .workbench-close { width: 32px; height: 32px; } #hud .workbench .item-name { font-size: 15px; } }
   #hud .workbench .item { display: flex; align-items: center; gap: 10px; padding: 9px 10px; border-radius: 12px; background: #384449; }
   #hud .workbench .item.worn { background: #2c535b; border: 1px solid rgba(191, 234, 242, 0.45); }
   #hud .workbench .item-text { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
@@ -201,7 +201,7 @@
   #hud .workbench .item.tier-5 { border-left: 4px solid #ff9a3a; }
   #hud .workbench .item.tier-1 { border-left: 4px solid #9aa3a6; }
   @media (min-width: 640px) { #hud .inventory-layout { flex-direction: row; align-items: flex-start; } #hud .doll-column { width: 270px; flex: none; } #hud .storage-sides { flex-direction: row; } }
-  @media (max-width: 639px) { #hud .backpack .workbench-card { max-height: 97vh; } #hud .doll-frame { height: 84px; width: 120px; } #hud .doll-image { width: 112px; height: 112px; margin-top: -16px; } #hud .equip-slot { min-width: 110px; padding: 4px; } #hud .equip-slot .slot-cell { width: 54px; height: 54px; } #hud .equip-slot .slot-image { width: 48px; height: 48px; } #hud .grid-column .item-details { order: -1; } #hud .grid-column .grid-title { order: -2; } }
+  @media (max-width: 639px) { #hud .backpack .workbench-card { max-height: 100%; } #hud .doll-frame { height: 84px; width: 120px; } #hud .doll-image { width: 112px; height: 112px; margin-top: -16px; } #hud .equip-slot { min-width: 110px; padding: 4px; } #hud .equip-slot .slot-cell { width: 54px; height: 54px; } #hud .equip-slot .slot-image { width: 48px; height: 48px; } #hud .grid-column .item-details { order: -1; } #hud .grid-column .grid-title { order: -2; } }
   @media (max-height: 500px) { #hud .doll-frame { height: 92px; width: 130px; } #hud .doll-image { width: 120px; height: 120px; margin-top: -14px; } #hud .equip-slot { min-width: 108px; padding: 4px; } #hud .slot-cell { width: 54px; height: 54px; } #hud .slot-grid { grid-template-columns: repeat(auto-fill, minmax(54px, 1fr)); } #hud .slot-image { width: 48px; height: 48px; } }
   #hud .enemy-bar { position: absolute; left: 0; top: 0; display: flex; flex-direction: column; align-items: center; gap: 2px; }
   #hud .enemy-bar.hidden { display: none; }
@@ -298,12 +298,12 @@
   #hud .helpers-button { background: rgba(47, 127, 143, 0.92); border-color: #bfeaf2; }
   #hud .molt-button { background: rgba(150, 70, 120, 0.92); border-color: #ffc6e6; }
   #hud .molt-button.hidden { display: none; }
-  #hud .storage-panel .workbench-card { max-height: min(92vh, 780px); }
+  #hud .storage-panel .workbench-card { max-height: min(100%, 780px); }
   #hud .workbench .item.naked { background: #4a3a3c; border: 1px solid rgba(255, 190, 170, 0.45); }
   #hud.panel-open .vitals { visibility: hidden; }
   #hud .backpack .workbench-card { position: relative; }
   #hud .item-popup { position: absolute; inset: 0; z-index: 5; display: flex; align-items: center; justify-content: center; padding: 10px; border-radius: 14px; background: rgba(10, 14, 16, 0.78); }
-  #hud .item-popup-card { position: relative; width: min(100%, 440px); max-height: 100%; overflow-y: auto; padding: 12px; border-radius: 14px; background: #2b373c; border: 2px solid #c9b48a; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
+  #hud .item-popup-card { margin: auto; position: relative; width: min(100%, 440px); max-height: 100%; overflow-y: auto; padding: 12px; border-radius: 14px; background: #2b373c; border: 2px solid #c9b48a; box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5); }
   #hud .item-popup-card .item-details { flex-direction: column; align-items: stretch; background: none; padding: 4px 0 0; }
   #hud .item-popup-card .item-text { padding-right: 40px; }
   #hud .item-popup-card .details-actions { flex-direction: row; flex-wrap: wrap; }
@@ -326,7 +326,7 @@
   #hud .enemy-name.difficulty-impossible { background: rgba(104, 12, 12, 0.95); color: #ffd9d4; }
   #hud .map-card { width: min(94vw, 600px); display: flex; flex-direction: column; gap: 8px; }
   #hud .map-side { order: -1; }
-  #hud .map-canvas { display: block; width: min(88vw, 560px, calc(100vh - 170px)); height: min(88vw, 560px, calc(100vh - 170px)); border-radius: 10px; margin: 0 auto; border: 3px solid #b89a64; box-shadow: 0 0 0 2px #4a3420, 0 6px 18px rgba(0, 0, 0, 0.45); background: #000; }
+  #hud .map-canvas { display: block; width: min(88vw, 560px, calc(100dvh - 170px)); height: min(88vw, 560px, calc(100dvh - 170px)); border-radius: 10px; margin: 0 auto; border: 3px solid #b89a64; box-shadow: 0 0 0 2px #4a3420, 0 6px 18px rgba(0, 0, 0, 0.45); background: #000; }
   #hud .map-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; justify-content: center; font-size: 13px; padding-top: 6px; }
   #hud .map-legend-entry { display: flex; align-items: center; gap: 6px; }
   #hud .map-key { width: 12px; height: 12px; border-radius: 50%; border: 2px solid #fff3d6; }
@@ -336,7 +336,7 @@
   #hud .map-key.rack { background: #7bd36a; border-color: #1d3b16; border-radius: 2px; }
   #hud .map-key.looter { background: #2a1a1a; border-color: #f2c94c; }
   #hud .map-key.boss { background: #2a1a1a; border-color: #e2533c; }
-  @media (max-height: 500px) { #hud .map-card { width: auto; flex-direction: row; align-items: flex-start; } #hud .map-side { order: 1; min-width: 150px; } #hud .map-canvas { width: calc(100vh - 56px); height: calc(100vh - 56px); } #hud .map-legend { flex-direction: column; align-items: flex-start; } }
+  @media (max-height: 500px) { #hud .map-card { width: auto; flex-direction: row; align-items: flex-start; } #hud .map-side { order: 1; min-width: 150px; } #hud .map-canvas { width: calc(100dvh - 56px); height: calc(100dvh - 56px); } #hud .map-legend { flex-direction: column; align-items: flex-start; } }
   #hud .workbench .job-select { display: flex; align-items: center; gap: 6px; font-size: 13px; }
   #hud .workbench .job-select select { max-width: 210px; padding: 5px 6px; border-radius: 8px; border: 1px solid rgba(255, 244, 214, 0.4); background: #2c3a3f; color: #fff8e8; font: inherit; font-size: 14px; pointer-events: auto; }
   #hud.placing .burrow-buttons { visibility: hidden; }
