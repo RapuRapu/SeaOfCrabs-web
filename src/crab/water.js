@@ -114,7 +114,7 @@ void main() {
   float facing = max(dot(-viewDirection, normal), 0.0);
   float fresnel = 0.02 + 0.98 * pow(1.0 - facing, 5.0);
   float towardSun = max(dot(reflected, uSunDirection), 0.0);
-  vec3 glitter = mix(uSunColor, vec3(1.0), 0.3) * min(pow(towardSun, 900.0) * 6.0 + pow(towardSun, 120.0) * 0.05, 1.1) * mix(0.3, 1.0, calmNearShore);
+  vec3 glitter = mix(uSunColor, vec3(1.0), 0.3) * min(pow(towardSun, 900.0) * 4.5 + pow(towardSun, 120.0) * 0.035, 0.8) * mix(0.3, 1.0, calmNearShore);
   vec3 color = mix(underwater, skyColor(reflected), fresnel) + glitter;
   color = mix(color, color * 1.12 + vec3(0.05), min(1.0, ripple.z) * 0.7);
 

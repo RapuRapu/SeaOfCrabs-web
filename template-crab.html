@@ -11,7 +11,7 @@
   #perf { position: fixed; top: calc(max(8px, env(safe-area-inset-top)) + 44px); right: max(8px, env(safe-area-inset-right)); padding: 4px 7px;
     font: 11px/1.35 ui-monospace, Menlo, Consolas, monospace; color: #e8f4f8; background: rgba(8, 24, 34, 0.55); border-radius: 6px; white-space: pre; pointer-events: auto; z-index: 5; }
   #perf.compact { max-height: 15px; overflow: hidden; }
-  #hud { position: fixed; inset: 0; pointer-events: none; font-family: Georgia, 'Times New Roman', serif; color: #fff8e8; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55); }
+  #hud { position: fixed; inset: 0; pointer-events: none; font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; color: #fff8e8; text-shadow: 0 1px 2px rgba(0, 0, 0, 0.55); }
   #hud button { pointer-events: auto; font-family: inherit; color: #fff8e8; cursor: pointer; }
   #hud .top-left { position: absolute; top: calc(max(8px, env(safe-area-inset-top)) + 42px); left: max(8px, env(safe-area-inset-left)); display: flex; align-items: center; gap: 8px; max-width: 62vw; }
   #hud .top-right { position: absolute; top: max(8px, env(safe-area-inset-top)); right: max(8px, env(safe-area-inset-right)); display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
@@ -51,7 +51,7 @@
   }
   #hud .game-log .log-hint { opacity: 0.6; font-style: italic; }
   #hud .game-log.expanded .log-lines { max-height: 46vh; overflow-y: auto; background: rgba(14, 20, 24, 0.94); }
-  #hud .game-log .log-line { flex: none; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+  #hud .game-log .log-line { flex: none; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #hud .game-log.expanded .log-line { display: block; padding: 1px 0; }
   #hud .game-log.expanded .log-lines { display: block; }
   #hud .game-log .log-time { opacity: 0.55; margin-right: 6px; font-variant-numeric: tabular-nums; }
@@ -64,6 +64,9 @@
   #hud .game-log.expanded .log-form { display: block; }
   #hud .game-log .log-input { width: 100%; box-sizing: border-box; padding: 6px 9px; border-radius: 8px; border: 1px solid rgba(255, 244, 214, 0.45); background: rgba(14, 20, 24, 0.85); color: #fff8e8; font: inherit; font-size: 16px; }
   #hud .log-combat { color: #ffd2c4; }
+  #hud .game-log .log-detail { display: block; padding-left: 10px; font-size: 11px; opacity: 0.75; }
+  #hud .hud-faded { opacity: 0.35; transition: opacity 0.25s; }
+  #hud .hud-fadeable { transition: opacity 0.25s; }
   #hud .log-helperCombat { color: #ffc98f; }
   #hud .log-loot { color: #f4e3b0; }
   #hud .log-build { color: #b8f0b0; }

@@ -612,7 +612,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
         const damage = hitDamage(attackOf(threat.enemy), defense);
         helper.health -= damage;
         helper.hurtAnimPending = true;
-        onLog('helperCombat', `${threat.enemy.definition.label} hits ${nameOf(helper)} for ${damage} — attack ${attackOf(threat.enemy)}, shell ${defense} blocks ${Math.min(attackOf(threat.enemy) - 1, defense / 2)} · HP ${Math.max(0, Math.ceil(helper.health))}/${helperMaxHealth(helper)}`);
+        onLog('helperCombat', `${threat.enemy.definition.label} hits ${nameOf(helper)} for ${damage} · HP ${Math.max(0, Math.ceil(helper.health))}/${helperMaxHealth(helper)}`, `attack ${attackOf(threat.enemy)} · shell ${defense} blocks ${Math.min(attackOf(threat.enemy) - 1, defense / 2)}`);
         onSound('shellClonk', helper);
         if (helper.health <= 0) {
           knockedOut(helper, threat.enemy);
@@ -898,7 +898,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
 
   function logHelperHit(helper, enemy, stats) {
     const defense = defenseOf(enemy);
-    onLog('helperCombat', `${nameOf(helper)} hits ${enemy.definition.label} for ${hitDamage(stats.attack, defense)} — attack ${stats.attack}, its armour ${defense} blocks ${Math.min(stats.attack - 1, defense / 2)}`);
+    onLog('helperCombat', `${nameOf(helper)} hits ${enemy.definition.label} for ${hitDamage(stats.attack, defense)}`, `attack ${stats.attack} · armour ${defense} blocks ${Math.min(stats.attack - 1, defense / 2)}`);
   }
 
   const follower = () => list.find((helper) => helper.job === 'follow') || null;

@@ -28,9 +28,9 @@ const TINTED_KINDS = { moray: [2, 2, 2], octopus: [0.6, 0.62, 0.9] };
 const OCTOPUS_ARM_CURL = 0.8;
 const OCTOPUS_HOLD_CURL = [0.15, 0.45, 0.6];
 const OCTOPUS_SHELL_BONE = 1;
-const FINGER_GRIP_REST = { giantLobster: -0.3 };
-const HOLDING_ARM_RAISE = 0.35;
-const HOLDING_ARM_SPREAD = -0.6;
+const FINGER_GRIP_REST = { giantLobster: -0.3, shoreCrab: -0.2 };
+const HOLDING_ARM_RAISE = -0.15;
+const HOLDING_ARM_SPREAD = 0.9;
 
 export async function loadCreatureAssets() {
   const [entries] = await Promise.all([Promise.all(Object.entries(CREATURE_BYTES).map(async ([kind, bytes]) => [kind, (await parseModel(bytes)).scene])), loadCookAsset()]);
@@ -256,7 +256,7 @@ export function createCreature(kind, quality) {
     for (const arm of arms) {
       const snap = arm.side < 0 ? snaps[0] : snaps[1];
       const holding = gripSides && gripSides.includes(arm.side);
-      arm.joints[0].pose(raised * 0.9 - snap * 0.6 + recoil * 0.6 + (holding ? HOLDING_ARM_RAISE : 0), -arm.side * (snap * 0.4 + (holding ? HOLDING_ARM_SPREAD : 0)));
+      arm.joints[0].pose(raised * 0.9 - snap * 0.6 + recoil * 0.6 + (holding ? HOLDING_ARM_RAISE : 0), -arm.side * snap * 0.4 + (holding ? arm.side * HOLDING_ARM_SPREAD : 0));
       arm.joints[1].pose(raised * 0.5 + snap * 0.5);
       arm.joints[2].pose(0);
     }

@@ -29,6 +29,7 @@ const POOLS = [
 const REEF_INNER_EDGE_Z = 54;
 const REEF_OUTER_EDGE_Z = 106;
 const REEF_DROP_LENGTH = 3;
+const REEF_EDGE_RAGGEDNESS = 3.2;
 const REEF_FLAT_HEIGHT = -2.8;
 const REEF_HIGHEST = -1.2;
 
@@ -79,7 +80,8 @@ function reefHeight(x, z, beach) {
   let flat = REEF_FLAT_HEIGHT + 1.3 * fractalNoise(reefNoise, x * 0.035, z * 0.035, 3) + 0.4 * fractalNoise(reefNoise, x * 0.11 + 30, z * 0.11, 2);
   flat += 0.55 * smoothstep(outerEdge - 12, outerEdge - 3, z) * (0.6 + 0.4 * reefNoise(x * 0.09, 5.5));
   flat = Math.min(flat, REEF_HIGHEST - 0.1 * reefNoise(x * 0.3, z * 0.3));
-  const dropShare = smoothstep(outerEdge, outerEdge + REEF_DROP_LENGTH, z);
+  const ragged = REEF_EDGE_RAGGEDNESS * fractalNoise(reefNoise, x * 0.14 + 70, z * 0.14, 3);
+  const dropShare = smoothstep(outerEdge + ragged, outerEdge + ragged + REEF_DROP_LENGTH * 2.2, z);
   return lerp(flat, Math.min(beach, DEEP_WATER_HEIGHT - 5), dropShare);
 }
 

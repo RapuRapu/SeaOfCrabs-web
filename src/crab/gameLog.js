@@ -51,8 +51,8 @@ export function createGameLog(parent, { localAuthor = 'You', transport = null } 
     render();
   }
 
-  function post(kind, text) {
-    receive({ kind, author: null, text });
+  function post(kind, text, detail = null) {
+    receive({ kind, author: null, text, detail });
   }
 
   function render() {
@@ -75,6 +75,12 @@ export function createGameLog(parent, { localAuthor = 'You', transport = null } 
         line.append(author);
       }
       line.append(document.createTextNode(entry.text));
+      if (expanded && entry.detail) {
+        const detail = document.createElement('span');
+        detail.className = 'log-detail';
+        detail.textContent = entry.detail;
+        line.append(detail);
+      }
       return line;
     }));
     if (!shown.length) {

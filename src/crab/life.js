@@ -9,7 +9,8 @@ const GRASS_COLORS = [linearColor(0.62, 0.68, 0.34), linearColor(0.74, 0.72, 0.4
 const BLADE_SEGMENTS = 6;
 
 const FLOATING_LEAF_LIFT = 0.015;
-const FLOATING_LEAF_SHADE = 0.55;
+const FLOATING_LEAF_SHADE = 0.78;
+const FLOATING_FOLD_SOFTNESS = 0.32;
 
 const BLADE_DECLARATIONS_GLSL = /* glsl */ `
 attribute vec3 aRoot;
@@ -46,10 +47,12 @@ const bladeMotion = (floats) => ({
     ${floats ? `
     float bladeSurface = max(uSeaLevel, texture2D(uRetained, transformed.xz / uWorldSize + 0.5).r) + ${FLOATING_LEAF_LIFT.toFixed(3)};
     float bladeExcess = transformed.y - bladeSurface;
-    if (bladeExcess > 0.0) {
-      transformed.y = max(aRoot.y + 0.05, bladeSurface) + bladeExcess * 0.03;
-      transformed.xz += normalize(sway + lean + vec2(0.31, 0.17)) * bladeExcess * 0.85;
-      float floatingShare = smoothstep(0.0, 0.15, bladeExcess);
+    float floatingShare = smoothstep(-${FLOATING_FOLD_SOFTNESS.toFixed(2)}, ${FLOATING_FOLD_SOFTNESS.toFixed(2)}, bladeExcess);
+    if (floatingShare > 0.0) {
+      float lyingExcess = max(bladeExcess, 0.0);
+      float lyingHeight = max(aRoot.y + 0.05, bladeSurface) + lyingExcess * 0.03;
+      transformed.y = mix(transformed.y, lyingHeight, floatingShare);
+      transformed.xz += normalize(sway + lean + vec2(0.31, 0.17)) * lyingExcess * 0.85;
       vNormal = normalize(mix(vNormal, normalMatrix * vec3(0.0, 1.0, 0.0), floatingShare));
       vColor.rgb *= mix(1.0, ${FLOATING_LEAF_SHADE.toFixed(2)}, floatingShare);
     }` : ''}

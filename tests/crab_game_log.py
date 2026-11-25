@@ -8,7 +8,7 @@ FLOW = r'''
   const d = window.__debug;
   const step = (seconds, until) => { let t = 0; for (; t < seconds; t += 1/60) { d.simulate(1/60); if (until && until()) break; } return t; };
   const out = {};
-  const texts = () => d.hud.gameLog.entries.map((entry) => `${entry.kind}|${entry.text}`);
+  const texts = () => d.hud.gameLog.entries.map((entry) => `${entry.kind}|${entry.text}${entry.detail ? ` || ${entry.detail}` : ''}`);
   d.setPaused(false);
   for (const enemy of d.enemies.list) Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 });
   out.noToastElement = !document.querySelector('#hud .toast');
@@ -83,7 +83,7 @@ with sync_playwright() as playwright:
         'toastsGone': out['noToastElement'] and out['logVisible'],
         'buildLogged': out['buildLogged'],
         'damageTakenBreakdown': bool(out['hitYou']) and 'armour' in out['hitYou'] and '%' in out['hitYou'] and 'HP ' in out['hitYou'],
-        'damageDealtBreakdown': bool(out['youHit']) and 'atk ' in out['youHit'],
+        'damageDealtBreakdown': bool(out['youHit']) and 'attack ' in out['youHit'],
         'killLogged': bool(out['defeated']),
         'chatEntry': out['chat']['kind'] == 'chat' and out['chat']['author'] == 'You' and out['chat']['text'] == 'hello crabs',
         'commands': out['helpListed'] and out['cleared'] == 0,

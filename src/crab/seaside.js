@@ -199,10 +199,10 @@ vec2 rockPoint = vSeaWorld.xz + vSeaWorld.y * vec2(0.37, 0.61);
 float rockMottle = texture2D(uNoise, rockPoint * 0.11).r;
 float rockSpeckle = texture2D(uNoise, rockPoint * 0.9).a;
 diffuseColor.rgb *= 0.9 + 0.2 * texture2D(uNoise, rockPoint * 1.3 + 0.7).a;
-float rockStrata = texture2D(uNoise, vec2(vSeaWorld.y * 0.19 + rockMottle * 0.45, rockPoint.x * 0.045)).g;
+float rockStrata = texture2D(uNoise, rockPoint * 0.07 + vec2(vSeaWorld.y * 0.05, rockMottle * 0.3)).g;
 diffuseColor.rgb *= 0.8 + 0.32 * rockMottle;
 diffuseColor.rgb *= 0.82 + 0.36 * texture2D(uNoise, rockPoint * 0.031 + 0.2).g;
-diffuseColor.rgb *= 0.93 + 0.14 * rockStrata;
+diffuseColor.rgb *= 0.95 + 0.1 * rockStrata;
 diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.7, 0.68, 0.56), smoothstep(0.8, 0.92, rockSpeckle) * 0.4);
 `;
 

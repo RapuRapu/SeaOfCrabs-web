@@ -189,7 +189,19 @@ export function createHud(activeQualityName) {
   });
   for (const button of qualityButtons) button.addEventListener('click', () => qualityListener(button.dataset.quality));
 
+  const fadeablePanels = [vitals, topLeft, gameLog.root, quickSlotBar, burrowButtons, travelGroup, topRight];
+  for (const panel of fadeablePanels) panel.classList.add('hud-fadeable');
+  function fadePanelsOver(screenCircles) {
+    for (const panel of fadeablePanels) {
+      const keepSolid = panel === gameLog.root && gameLog.expanded;
+      const box = panel.getBoundingClientRect();
+      const covers = !keepSolid && box.width > 0 && screenCircles.some(({ x, y, radius }) => x + radius > box.left && x - radius < box.right && y + radius > box.top && y - radius < box.bottom);
+      panel.classList.toggle('hud-faded', covers);
+    }
+  }
+
   return {
+    fadePanelsOver,
     onPause: (listener) => { pauseListener = listener; },
     onReset: (listener) => { resetListener = listener; },
     onQuality: (listener) => { qualityListener = listener; },
@@ -214,8 +226,8 @@ export function createHud(activeQualityName) {
       performanceToggle.checked = visible;
     },
     gameLog,
-    log(kind, text) {
-      gameLog.post(kind, text);
+    log(kind, text, detail = null) {
+      gameLog.post(kind, text, detail);
     },
     setVolumes(values) {
       for (const [key, input] of Object.entries(volumeInputs)) input.value = values[key];

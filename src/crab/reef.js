@@ -29,7 +29,7 @@ const URCHIN_SPINE_TIP = linearColor(0.42, 0.2, 0.5);
 const UP = new THREE.Vector3(0, 1, 0);
 const REEF_CHUNK_COUNT = 3;
 const RUBBLE_HIGHEST_FLOOR = -2.6;
-const CORAL_TIP_TAPER = 0.22;
+const CORAL_TIP_TAPER = 0.06;
 const REEF_CHUNK_SPAN = 236;
 const reefPropNoise = createNoise2D(311);
 const lumpAt = (x, y, z, frequency) => (reefPropNoise(x * frequency + 3.1, y * frequency) + reefPropNoise(y * frequency + 7.7, z * frequency) + reefPropNoise(z * frequency + 1.3, x * frequency + 5.2)) / 3;
@@ -184,7 +184,7 @@ function buildRubble(world, quality) {
 export function createReefProps(scene, world, quality) {
   const detailed = quality.density >= 1;
   const builders = {
-    branchCoral: (prop) => buildBranchCoral(prop, detailed ? 5 : 4),
+    branchCoral: (prop) => buildBranchCoral(prop, detailed ? 6 : 5),
     brainCoral: (prop) => (detailed ? buildBrainCoral(prop, 34, 11) : quality.density >= 0.7 ? buildBrainCoral(prop, 28, 9) : buildBrainCoral(prop, 22, 7)),
     barnacleRock: (prop) => buildBarnacleRock(prop, 2),
     urchin: (prop) => buildUrchin(prop, detailed ? 28 : 20),

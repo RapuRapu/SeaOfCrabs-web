@@ -77,12 +77,34 @@ function buildShellBitGeometry() {
   return paint(geometry, (color, x, y, z) => color.copy(pale).lerp(rose, 0.5 + 0.5 * Math.sin(Math.hypot(x, z + 0.42) * 16)));
 }
 
+function gnarledStick(length, startRadius, endRadius, bendAmount, seed) {
+  const stick = new THREE.CylinderGeometry(endRadius, startRadius, length, 10, 12).rotateZ(Math.PI / 2);
+  const positions = stick.attributes.position;
+  const point = new THREE.Vector3();
+  for (let index = 0; index < positions.count; index++) {
+    point.fromBufferAttribute(positions, index);
+    const along = point.x / length;
+    const angle = Math.atan2(point.z, point.y);
+    const groove = 1 + 0.12 * Math.sin(angle * 7 + along * 6 + seed) + 0.06 * Math.sin(angle * 13 - along * 9);
+    point.y = point.y * groove + bendAmount * (0.25 - along * along) + 0.03 * Math.sin(along * 17 + seed);
+    point.z = point.z * groove + bendAmount * 0.6 * Math.sin(along * 3.1 + seed);
+    positions.setXYZ(index, point.x, point.y, point.z);
+  }
+  stick.computeVertexNormals();
+  return stick;
+}
+
 function buildDriftwoodGeometry() {
-  const bark = linearColor(0.5, 0.36, 0.24);
-  const core = linearColor(0.78, 0.62, 0.42);
-  const stick = new THREE.CylinderGeometry(0.1, 0.13, 1.9, 8).rotateZ(Math.PI / 2).translate(0, 0.12, 0);
-  const branch = new THREE.CylinderGeometry(0.05, 0.08, 0.7, 6).rotateZ(Math.PI / 2).rotateY(0.9).translate(0.3, 0.14, -0.3);
-  return paint(mergeGeometries([stick, branch]), (color, x) => color.copy(bark).lerp(core, Math.abs(x) > 0.9 ? 1 : 0.15 + 0.15 * Math.sin(x * 23)));
+  const bark = linearColor(0.42, 0.37, 0.32);
+  const weathered = linearColor(0.62, 0.58, 0.52);
+  const core = linearColor(0.72, 0.6, 0.44);
+  const stick = gnarledStick(1.9, 0.14, 0.09, 0.22, 1.7).translate(0, 0.13, 0);
+  const branch = gnarledStick(0.75, 0.08, 0.035, 0.1, 4.2).rotateY(0.9).translate(0.32, 0.15, -0.3);
+  return paint(mergeGeometries([stick, branch]), (color, x, y, z) => {
+    const grain = 0.5 + 0.5 * Math.sin(Math.atan2(z, y - 0.13) * 11 + x * 1.5) * (0.7 + 0.3 * Math.sin(x * 9));
+    color.copy(bark).lerp(weathered, 0.35 + 0.4 * grain);
+    if (Math.abs(x) > 0.93) color.lerp(core, 0.8);
+  });
 }
 
 function buildSeaLettuceGeometry() {

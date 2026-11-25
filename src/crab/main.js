@@ -685,7 +685,7 @@ const helpers = createHelpers(scene, {
   onSound: (name, helper) => {
     if (helper.inside === underground) soundAt(name, helper.x, helper.z, 0.45);
   },
-  onLog: (kind, text) => hud.log(kind, text),
+  onLog: (kind, text, detail) => hud.log(kind, text, detail),
   playerVitals: () => (player.alive ? { alive: true, inside: underground, x: player.x, z: player.z, health: progression.state.health, maxHealth: progression.maxHealth() } : null),
   healPlayer: (amount) => {
     const healed = Math.max(0, Math.min(amount, progression.maxHealth() - progression.state.health));
@@ -2090,7 +2090,7 @@ function rollDamageDetailed(attack, defense) {
 
 const rollDamage = (attack, defense) => rollDamageDetailed(attack, defense).damage;
 const roundedText = (value) => String(Math.round(value * 10) / 10);
-const rollText = (spread) => `${Math.round(spread * 100)} %`;
+const rollText = (spread) => `roll ${Math.round(spread * 100)} %`;
 
 const HANDS_HOLDING_SHIELD = () => ['big', 'small'].map((hand) => gear.heldIn(hand)).filter((item) => item && CLAWS[item.kind].shield);
 
@@ -2140,8 +2140,8 @@ function strike(enemy) {
   const hand = stats.strikingHands[player.hitCount % stats.strikingHands.length];
   const roll = rollDamageDetailed(stats.handAttack[hand], pierces ? 0 : defenseOf(enemy));
   const damage = roll.damage * (isSting ? 2 : 1);
-  const armourText = pierces ? 'armour pierced' : `armour ${defenseOf(enemy)} −${roundedText(roll.blocked)}`;
-  hud.log('combat', `You hit ${enemy.definition.label} for ${damage} (${stats.strikingHands.length > 1 ? `${HAND_LABELS[hand].toLowerCase()} ` : ''}atk ${stats.handAttack[hand]}, ${armourText}, ${rollText(roll.spread)}${isSting ? ', sting ×2' : ''})`);
+  const armourText = pierces ? 'armour pierced' : `armour ${defenseOf(enemy)} blocks ${roundedText(roll.blocked)}`;
+  hud.log('combat', `You hit ${enemy.definition.label} for ${damage}`, `${stats.strikingHands.length > 1 ? `${HAND_LABELS[hand].toLowerCase()} · ` : ''}attack ${stats.handAttack[hand]} · ${armourText} · ${rollText(roll.spread)}${isSting ? ' · sting ×2' : ''}`);
   player.lastCombatTime = simulationTime;
   floatAt(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight * 0.7, enemy.z, isSting ? `${damage}!` : String(damage), isSting ? 'sting' : 'dealt');
   hermit.playAttack(isSting ? 'both' : hand);
@@ -2187,7 +2187,7 @@ function hitPlayer(enemy) {
   }
   progression.state.health -= damage;
   player.lastHitBy = enemy;
-  hud.log('combat', `${enemy.definition.label} hits you for ${damage} (atk ${attackOf(enemy)}, armour ${stats.defense} −${roundedText(roll.blocked)} [${armourParts()}], ${rollText(roll.spread)}${modifiers.length ? `, ${modifiers.join(', ')}` : ''}) · ${healthText()}`);
+  hud.log('combat', `${enemy.definition.label} hits you for ${damage} · ${healthText()}`, `attack ${attackOf(enemy)} · your armour ${stats.defense} blocks ${roundedText(roll.blocked)} (${armourParts()}) · ${rollText(roll.spread)}${modifiers.length ? ` · ${modifiers.join(' · ')}` : ''}`);
   player.lastCombatTime = simulationTime;
   floatAt(player.x, player.y + 2.4, player.z, `−${damage}`, 'taken');
   hud.flashHurt();
@@ -2352,6 +2352,39 @@ function dropStolenGear(enemy) {
   remains.add({ x: enemy.x, z: enemy.z, inventory: {}, gear: returned });
   const names = [...returned.shells, ...returned.claws].map((item) => itemName(SHELLS[item.kind] ? 'shell' : 'claws', item)).join(' and ');
   hud.log('loot', `${enemy.definition.label} dropped your ${names}`);
+}
+
+const HUD_FADE_INTERVAL_SECONDS = 0.2;
+const HUD_FADE_REACH = 9;
+const creatureScreenPoint = new THREE.Vector3();
+const creatureEdgePoint = new THREE.Vector3();
+let nextHudFadeTime = 0;
+function creatureCircle(x, y, z, radius) {
+  creatureScreenPoint.set(x, y + radius * 0.6, z).project(camera);
+  if (creatureScreenPoint.z > 1) return null;
+  creatureEdgePoint.set(x + radius, y + radius * 0.6, z).project(camera);
+  const width = window.innerWidth;
+  const height = window.innerHeight;
+  const toPixels = (point) => ({ x: (point.x * 0.5 + 0.5) * width, y: (-point.y * 0.5 + 0.5) * height });
+  const center = toPixels(creatureScreenPoint);
+  const edge = toPixels(creatureEdgePoint);
+  return { ...center, radius: Math.max(12, Math.hypot(edge.x - center.x, edge.y - center.y)) };
+}
+
+function fadeHudOverCreatures() {
+  if (performance.now() / 1000 < nextHudFadeTime) return;
+  nextHudFadeTime = performance.now() / 1000 + HUD_FADE_INTERVAL_SECONDS;
+  const circles = [];
+  if (!underground) {
+    const playerCircle = creatureCircle(player.x, player.y, player.z, player.size * 0.9);
+    if (playerCircle) circles.push(playerCircle);
+    for (const enemy of enemies.list) {
+      if (!enemies.alive(enemy) || Math.hypot(enemy.x - player.x, enemy.z - player.z) > HUD_FADE_REACH * 3) continue;
+      const circle = creatureCircle(enemy.x, enemy.y + (enemy.altitude || 0), enemy.z, enemy.definition.radius * 1.1);
+      if (circle) circles.push(circle);
+    }
+  }
+  hud.fadePanelsOver(circles);
 }
 
 function finishDeath() {
@@ -2854,6 +2887,7 @@ function renderScene() {
   spotFeedback.visible = spotFeedback.visible && simulationTime < spotFeedbackUntil && !underground;
   spotFeedback.scale.setScalar(1 + 0.08 * Math.sin(simulationTime * 5));
   enemies.render(simulationTime, camera, player.combatTarget ? player.combatTarget.id : null, { x: player.x, z: player.z, level: progression.state.level, isRevealed: fog.isRevealed });
+  fadeHudOverCreatures();
   remains.update(simulationTime, camera);
   hud.setVitals(progression.state.level, progression.state.health, progression.maxHealth(), progression.state.experience, progression.experienceToNext());
   const farZoomShare = THREE.MathUtils.smoothstep(cameraDistance, ...FAR_ZOOM_RING_DISTANCES);

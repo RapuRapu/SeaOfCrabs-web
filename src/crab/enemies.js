@@ -85,14 +85,16 @@ const CREATURE_SCALE = { sandHopper: 1, shoreCrab: 1, gull: 1 };
 const RIVAL_HERMIT_SCALE = 0.95;
 const RIVAL_CULL_RADIUS = 4;
 const RIVAL_WEAPON_SCALE = 1.5;
-const LOOTER_LABEL_LIFT = 1.35;
+const LOOTER_LABEL_LIFT = 1.15;
+const LABEL_CLEARANCE = 1.1;
 const LOOT_SHELL_BRIGHTNESS = 1.35;
-const LOOT_WEAPON_LIFT_BY_KIND = { giantLobster: 1.0, shoreCrab: 0.4 };
+const LOOT_WEAPON_LIFT_BY_KIND = { giantLobster: 1.0, shoreCrab: 0.5 };
 const LOOT_WEAPON_SPLAY_BY_KIND = { shoreCrab: 1.8 };
 const RIVAL_HERMIT_TINT = [0.45, 0.6, 1.0];
 const RIVAL_GROUND = new THREE.Vector3(0, 1, 0);
 const LOOT_WEAPON_SCALE = { shoreCrab: 1.0, giantLobster: 0.9 };
-const LOOT_GRIP_ALONG_JAW = { giantLobster: 0.6 };
+const LOOT_GRIP_ALONG_JAW = { giantLobster: 0.6, shoreCrab: 0.4 };
+const SMALL_HAND_WEAPON_SCALE = 0.75;
 const DEFAULT_GRIP_ALONG_JAW = 0.55;
 const LOOT_WEAPON_SPLAY = 0.6;
 const LOOT_WEAPON_LIFT = 0.15;
@@ -1026,6 +1028,21 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     return lootMaterials.get(key);
   }
 
+  const modelBounds = new THREE.Box3();
+  const boundsCorner = new THREE.Vector3();
+  function projectLabelAnchor(enemy, camera) {
+    labelPoint.set(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight * (isLooter(enemy) ? LOOTER_LABEL_LIFT : 1), enemy.z).project(camera);
+    const body = enemy.creature ? enemy.creature.object : enemy.hermit ? enemy.hermit.root : null;
+    if (!body || !body.visible) return;
+    modelBounds.setFromObject(body);
+    if (modelBounds.isEmpty()) return;
+    modelBounds.max.y += LABEL_CLEARANCE;
+    for (let corner = 0; corner < 8; corner++) {
+      boundsCorner.set(corner & 1 ? modelBounds.max.x : modelBounds.min.x, corner & 2 ? modelBounds.max.y : modelBounds.min.y, corner & 4 ? modelBounds.max.z : modelBounds.min.z).project(camera);
+      if (boundsCorner.y > labelPoint.y) labelPoint.y = boundsCorner.y;
+    }
+  }
+
   function dressLoot(enemy) {
     const loot = enemy.loot || {};
     const shownKey = `${loot.shell ? loot.shell.kind : ''}|${loot.big ? loot.big.kind : ''}|${loot.small ? loot.small.kind : ''}`;
@@ -1044,7 +1061,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       const item = loot[which];
       const hand = enemy.creature.hands && enemy.creature.hands[which];
       if (!item || !hand || !weaponModelAvailable(item.kind)) continue;
-      const weapon = buildHeldWeapon(item.kind, lootMaterial('claws', item.kind), hand.length, hand.length * (LOOT_WEAPON_SCALE[enemy.kind] || 1));
+      const weapon = buildHeldWeapon(item.kind, lootMaterial('claws', item.kind), hand.length, hand.length * (LOOT_WEAPON_SCALE[enemy.kind] || 1) * (which === 'small' ? SMALL_HAND_WEAPON_SCALE : 1));
       const holder = new THREE.Group();
       holder.userData.hand = hand;
       holder.add(weapon);
@@ -1427,7 +1444,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       const nearViewer = alive(enemy) && !flyingHigh && Math.hypot(enemy.x - viewer.x, enemy.z - viewer.z) < NAME_VISIBLE_DISTANCE;
       const barVisible = (inFight || nearViewer || Boolean(restText)) && viewer.isRevealed(enemy.x, enemy.z);
       if (restText) labelPoint.set(enemy.home.x, world.heightAt(enemy.home.x, enemy.home.z) + Math.min(enemy.definition.barHeight, 6), enemy.home.z).project(camera);
-      else if (barVisible) labelPoint.set(enemy.x, enemy.y + enemy.altitude + enemy.definition.barHeight * (isLooter(enemy) ? LOOTER_LABEL_LIFT : 1), enemy.z).project(camera);
+      else if (barVisible) projectLabelAnchor(enemy, camera);
       const onScreen = barVisible && labelPoint.z < 1;
       enemy.bar.box.classList.toggle('hidden', !onScreen);
       enemy.bar.box.classList.toggle('resting', Boolean(restText));
