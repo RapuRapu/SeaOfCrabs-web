@@ -29,7 +29,9 @@ const URCHIN_SPINE_TIP = linearColor(0.42, 0.2, 0.5);
 const UP = new THREE.Vector3(0, 1, 0);
 const REEF_CHUNK_COUNT = 3;
 const RUBBLE_HIGHEST_FLOOR = -2.6;
-const CORAL_TIP_TAPER = 0.06;
+const CORAL_TIP_TAPER = 0.42;
+const CORAL_CAP_FLATTEN = 0.85;
+const CORAL_JOINT_SINK = 1.2;
 const REEF_CHUNK_SPAN = 236;
 const reefPropNoise = createNoise2D(311);
 const lumpAt = (x, y, z, frequency) => (reefPropNoise(x * frequency + 3.1, y * frequency) + reefPropNoise(y * frequency + 7.7, z * frequency) + reefPropNoise(z * frequency + 1.3, x * frequency + 5.2)) / 3;
@@ -53,6 +55,13 @@ function orientedTube(start, direction, length, startRadius, endRadius, radialSe
   return tube.translate(start.x, start.y, start.z);
 }
 
+function orientedCap(centre, direction, radius, radialSegments) {
+  const cap = new THREE.SphereGeometry(radius, radialSegments, 2, 0, Math.PI * 2, 0, Math.PI / 2).scale(1, CORAL_CAP_FLATTEN, 1);
+  cap.deleteAttribute('uv');
+  cap.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(UP, direction));
+  return cap.translate(centre.x, centre.y, centre.z);
+}
+
 function buildBranchCoral(prop, radialSegments) {
   const random = createRandom(Math.floor(prop.seed * 7) + 1);
   const [baseColor, tipColor] = BRANCH_CORAL_PALETTES[Math.floor(prop.tone * BRANCH_CORAL_PALETTES.length)];
@@ -61,15 +70,21 @@ function buildBranchCoral(prop, radialSegments) {
   const reach = scale * 1.25;
   const grow = (start, direction, length, radius, depth) => {
     const end = start.clone().addScaledVector(direction, length);
-    tubes.push({ geometry: orientedTube(start, direction, length, radius, radius * (depth === 0 ? CORAL_TIP_TAPER : 0.62), radialSegments), endHeight: end.y });
-    if (depth === 0) return;
+    const endRadius = radius * (depth === 0 ? CORAL_TIP_TAPER : 0.62);
+    const tube = orientedTube(start, direction, length, radius, endRadius, radialSegments);
+    tube.deleteAttribute('uv');
+    tubes.push({ geometry: tube, endHeight: end.y + endRadius });
+    if (depth === 0) {
+      tubes.push({ geometry: orientedCap(end, direction, endRadius, radialSegments), endHeight: end.y + endRadius });
+      return;
+    }
     const forks = 2 + Math.floor(random() * 2);
     for (let fork = 0; fork < forks; fork++) {
       const turn = random() * Math.PI * 2;
       const spread = 0.35 + random() * 0.45;
       const next = direction.clone().applyAxisAngle(new THREE.Vector3(Math.cos(turn), 0, Math.sin(turn)), spread).normalize();
       next.y = Math.max(next.y, 0.25);
-      grow(end, next.normalize(), length * (0.7 + random() * 0.2), radius * 0.68, depth - 1);
+      grow(end.clone().addScaledVector(direction, -endRadius * CORAL_JOINT_SINK), next.normalize(), length * (0.7 + random() * 0.2), radius * 0.68, depth - 1);
     }
   };
   const trunks = 4 + Math.floor(random() * 2);

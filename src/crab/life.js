@@ -6,11 +6,17 @@ import { applySeaside, createMotionDepthMaterial } from './seaside.js';
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 const SEAWEED_COLORS = [linearColor(0.2, 0.42, 0.14), linearColor(0.34, 0.5, 0.12), linearColor(0.5, 0.3, 0.14), linearColor(0.14, 0.34, 0.2)];
 const GRASS_COLORS = [linearColor(0.62, 0.68, 0.34), linearColor(0.74, 0.72, 0.4), linearColor(0.5, 0.6, 0.3)];
-const BLADE_SEGMENTS = 6;
+const GRASS_BLADE_SEGMENTS = 6;
+const SEAWEED_LENGTH_SEGMENTS = 10;
+const SEAWEED_WIDTH_SEGMENTS = 2;
+const SEAWEED_MIDRIB_CUP = 0.14;
+const SEAWEED_EDGE_RUFFLE = 0.05;
+const FLOATING_MEANDER = 0.22;
+const FLOATING_BEND_RADIUS = 0.5;
 
 const FLOATING_LEAF_LIFT = 0.015;
-const FLOATING_LEAF_SHADE = 0.78;
-const FLOATING_FOLD_SOFTNESS = 0.32;
+const FLOATING_LEAF_SHADE = 1.15;
+const FLOATING_FOLD_SOFTNESS = 0.45;
 
 const BLADE_DECLARATIONS_GLSL = /* glsl */ `
 attribute vec3 aRoot;
@@ -43,24 +49,30 @@ const bladeMotion = (floats) => ({
     vec2 sway = vec2(sin(swayPhase), cos(swayPhase * 0.83 + 1.3)) * (bladeAlong * bladeAlong) * bladeLength * ${floats ? '0.34' : '0.1'};
     vec2 lean = vec2(cos(aBlade.w * 3.7), sin(aBlade.w * 3.7)) * (bladeAlong * bladeAlong) * bladeLength * ${floats ? '0.12' : '0.34'};
     transformed = aRoot + vec3(cos(aBlade.z) * bladeSide + sway.x + lean.x, bladeAlong * bladeLength * ${floats ? '1.0' : '0.92'}, sin(aBlade.z) * bladeSide + sway.y + lean.y);
+    ${floats ? `
+    float bladeCentreness = 1.0 - 4.0 * position.x * position.x;
+    transformed.xz += vec2(-sin(aBlade.z), cos(aBlade.z)) * bladeCentreness * aBlade.y * ${SEAWEED_MIDRIB_CUP.toFixed(2)} * (1.0 - bladeAlong * 0.6);` : ''}
     ${CRAB_PUSH_GLSL}
     ${floats ? `
     float bladeSurface = max(uSeaLevel, texture2D(uRetained, transformed.xz / uWorldSize + 0.5).r) + ${FLOATING_LEAF_LIFT.toFixed(3)};
     float bladeExcess = transformed.y - bladeSurface;
     float floatingShare = smoothstep(-${FLOATING_FOLD_SOFTNESS.toFixed(2)}, ${FLOATING_FOLD_SOFTNESS.toFixed(2)}, bladeExcess);
     if (floatingShare > 0.0) {
-      float lyingExcess = max(bladeExcess, 0.0);
-      float lyingHeight = max(aRoot.y + 0.05, bladeSurface) + lyingExcess * 0.03;
+      float lyingExcess = 0.5 * (bladeExcess + sqrt(bladeExcess * bladeExcess + ${FLOATING_BEND_RADIUS.toFixed(2)} * ${FLOATING_BEND_RADIUS.toFixed(2)})) - 0.5 * ${FLOATING_BEND_RADIUS.toFixed(2)};
+      float edgeRuffle = (1.0 - bladeCentreness) * sin(bladeAlong * bladeLength * 5.0 + aBlade.w * 2.0) * ${SEAWEED_EDGE_RUFFLE.toFixed(3)};
+      float lyingHeight = max(aRoot.y + 0.05, bladeSurface) + lyingExcess * 0.03 + bladeCentreness * 0.012 + edgeRuffle;
       transformed.y = mix(transformed.y, lyingHeight, floatingShare);
-      transformed.xz += normalize(sway + lean + vec2(0.31, 0.17)) * lyingExcess * 0.85;
+      vec2 driftDirection = normalize(sway + lean + vec2(0.31, 0.17));
+      transformed.xz += driftDirection * lyingExcess * 0.85;
+      transformed.xz += vec2(-driftDirection.y, driftDirection.x) * sin(lyingExcess * 2.2 + aBlade.w) * lyingExcess * ${FLOATING_MEANDER.toFixed(2)};
       vNormal = normalize(mix(vNormal, normalMatrix * vec3(0.0, 1.0, 0.0), floatingShare));
       vColor.rgb *= mix(1.0, ${FLOATING_LEAF_SHADE.toFixed(2)}, floatingShare);
     }` : ''}
   `,
 });
 
-function buildBladeField(placements, colors, quality, { floats, castShadow }) {
-  const strip = new THREE.PlaneGeometry(1, 1, 1, BLADE_SEGMENTS).translate(0, 0.5, 0);
+function buildBladeField(placements, colors, quality, { floats, castShadow, widthSegments, lengthSegments }) {
+  const strip = new THREE.PlaneGeometry(1, 1, widthSegments, lengthSegments).translate(0, 0.5, 0);
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.index = strip.index;
   geometry.setAttribute('position', strip.attributes.position);
@@ -79,7 +91,14 @@ function buildBladeField(placements, colors, quality, { floats, castShadow }) {
   geometry.setAttribute('color', new THREE.InstancedBufferAttribute(tints, 3));
   geometry.instanceCount = placements.length;
   const motion = bladeMotion(floats);
-  const material = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: floats ? 0.45 : 0.7, side: THREE.DoubleSide }), { wetDarkening: 0.85, wetRoughness: 0.3, causticStrength: 1.6, chromaticCaustics: quality.chromaticCaustics, glow: floats ? 0.1 : 0.06, vertexMotion: motion });
+  const material = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: floats ? 0.7 : 0.7, side: THREE.DoubleSide }), { wetDarkening: floats ? 1.0 : 0.85, wetRoughness: floats ? 0.7 : 0.3, causticStrength: 1.6, chromaticCaustics: quality.chromaticCaustics, glow: floats ? 0.1 : 0.06, vertexMotion: motion });
+  const seasideCompile = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    seasideCompile(shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal *= faceDirection;');
+  };
+  const seasideCacheKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => `${seasideCacheKey()}|blade-both-faces-lit`;
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.receiveShadow = true;
@@ -293,6 +312,13 @@ function buildFishSchool(world, quality) {
   geometry.setAttribute('color', new THREE.InstancedBufferAttribute(new Float32Array(tints), 3));
   geometry.instanceCount = orbits.length / 4;
   const material = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.35, metalness: 0.1 }), { wetDarkening: 1, causticStrength: 1.2, chromaticCaustics: false, vertexMotion: fishMotion });
+  const seasideCompile = material.onBeforeCompile;
+  material.onBeforeCompile = (shader, renderer) => {
+    seasideCompile(shader, renderer);
+    shader.fragmentShader = shader.fragmentShader.replace('#include <normal_fragment_begin>', '#include <normal_fragment_begin>\n  normal *= faceDirection;');
+  };
+  const seasideCacheKey = material.customProgramCacheKey;
+  material.customProgramCacheKey = () => `${seasideCacheKey()}|blade-both-faces-lit`;
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
   mesh.castShadow = true;
@@ -301,8 +327,8 @@ function buildFishSchool(world, quality) {
 }
 
 export function createLife(scene, world, quality) {
-  scene.add(buildBladeField(seaweedPlacements(world, quality), SEAWEED_COLORS, quality, { floats: true, castShadow: false }));
-  scene.add(buildBladeField(grassPlacements(world, quality), GRASS_COLORS, quality, { floats: false, castShadow: quality.grassShadows }));
+  scene.add(buildBladeField(seaweedPlacements(world, quality), SEAWEED_COLORS, quality, { floats: true, castShadow: false, widthSegments: SEAWEED_WIDTH_SEGMENTS, lengthSegments: SEAWEED_LENGTH_SEGMENTS }));
+  scene.add(buildBladeField(grassPlacements(world, quality), GRASS_COLORS, quality, { floats: false, castShadow: quality.grassShadows, widthSegments: 1, lengthSegments: GRASS_BLADE_SEGMENTS }));
 
   const random = createRandom(77);
   const starfishColors = [linearColor(0.95, 0.42, 0.16), linearColor(0.82, 0.2, 0.24), linearColor(0.6, 0.3, 0.62), linearColor(0.98, 0.66, 0.2)];

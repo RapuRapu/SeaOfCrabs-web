@@ -125,7 +125,7 @@ with sync_playwright() as playwright:
     checks['saved'] = reloaded == {'reefFound': True, 'coral': 1, 'seaGlass': 1}
     performance = {'start': frame_numbers(context, 1), 'onReef': frame_numbers(context, 59), 'reefEdge': frame_numbers(context, 64)}
     print(json.dumps(performance))
-    checks['performance'] = performance['start']['calls'] <= 90 and performance['start']['triangles'] < 1215000 and all(performance[view]['calls'] <= 104 and performance[view]['triangles'] < 1400000 for view in ('onReef', 'reefEdge'))
+    checks['performance'] = performance['start']['calls'] <= 90 and performance['start']['triangles'] < 1215000 and all(performance[view]['calls'] <= 104 and performance[view]['triangles'] < 1550000 for view in ('onReef', 'reefEdge'))
     checks['noConsoleErrors'] = not errors
     if errors: print(errors[:5])
     browser.close()

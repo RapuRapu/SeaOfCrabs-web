@@ -269,6 +269,8 @@ const POSES = {
   129: { x: -60, z: 91, distance: 16, tideShare: 0.75, heading: 0.2, level: 10, revealAround: 60, outfit: { shell: 'coral', claws: 'coralTipped', quality: 'fine' }, enemy: { kind: 'giantLobster', offsetX: -1, offsetZ: 5, loot: { big: 'cleaver' } } },
   130: { x: 10, z: 80, distance: 9, tideShare: 0.75, heading: 0.4, level: 8, revealAround: 60, enemy: { kind: 'octopus', offsetX: 2.2, offsetZ: 2.2, loot: { shell: 'turban' } } },
   131: { x: 15, z: -20, distance: 6, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 1.2, offsetZ: -1.8, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } } },
+  132: { x: 13, z: -9, distance: 9, tideShare: 0.56, heading: 0.2 },
+  133: { x: -2, z: -6, distance: 8, tideShare: 0.3, heading: 0.2 },
   127: { x: 15, z: -20, distance: 10, tideShare: 0.56, heading: 0.9, level: 6, enemy: { kind: 'rivalHermit', offsetX: 2.6, offsetZ: 1.6, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } }, fightSeconds: 1.2, moment: 'strike' },
   25: { x: 30, z: -40, distance: 13, tideShare: 0.56, heading: 0.5, enemy: { kind: 'sandHopper', offsetX: 1.4, offsetZ: 2.6 }, fightSeconds: 0 },
   26: { x: 0, z: -104, distance: 40, tideShare: 0.56, heading: 3.2, level: 6, enemy: { kind: 'gull', offsetX: -2, offsetZ: -5.5 }, fightSeconds: 3.4 },
