@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PLAY_BOUNDS } from './worldBounds.js';
 import { levelOf, labelOf, isLooter } from './looting.js';
 import { createHermit } from './hermit.js';
 import { SHELLS } from './gear.js';
@@ -12,6 +13,7 @@ import { buildCockroachGeometry, buildCookLegGeometry, buildCleaverGeometry, LIN
 
 export const PLAYER_BODY_RADIUS = 0.9;
 export const LEASH_DISTANCE = 35;
+const ENEMY_ACTIVE_RADIUS = 140;
 const LEASH_GRACE_SECONDS = 3;
 const REGEN_DELAY_SECONDS = 6;
 const REGEN_SHARE_PER_SECOND = 0.03;
@@ -396,8 +398,8 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       return free.length ? free[Math.floor(random() * free.length)] : null;
     }
     for (let attempt = 0; attempt < 600; attempt++) {
-      const x = near ? near.x + (random() * 2 - 1) * PACK_SPREAD : (random() * 2 - 1) * 118;
-      const z = near ? near.z + (random() * 2 - 1) * PACK_SPREAD : (random() * 2 - 1) * 118;
+      const x = near ? near.x + (random() * 2 - 1) * PACK_SPREAD : THREE.MathUtils.lerp(PLAY_BOUNDS.minX, PLAY_BOUNDS.maxX, random());
+      const z = near ? near.z + (random() * 2 - 1) * PACK_SPREAD : THREE.MathUtils.lerp(PLAY_BOUNDS.minZ, PLAY_BOUNDS.maxZ, random());
       if (!world.isWalkable(x, z)) continue;
       const height = world.heightAt(x, z);
       if (!entry.accept(world, x, z, height)) continue;
@@ -914,6 +916,8 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
         }
         continue;
       }
+      const resting = enemy.state === 'idle' || enemy.state === 'circling';
+      if (resting && Math.hypot(player.x - enemy.x, player.z - enemy.z) > ENEMY_ACTIVE_RADIUS) continue;
       enemy.strike = Math.max(0, enemy.strike - deltaTime * 3);
       const idleSound = IDLE_SOUNDS[enemy.kind];
       if (idleSound && (enemy.state === 'idle' || enemy.state === 'circling') && random() < idleSound.perSecond * deltaTime) onSound(idleSound.name, enemy);

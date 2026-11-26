@@ -381,7 +381,7 @@ sun.layers.enable(BURROW_LAYER);
 scene.add(sun, sun.target);
 
 scene.add(world.terrainMesh);
-createProps(scene, world, quality);
+const props = createProps(scene, world, quality);
 const reefProps = createReefProps(scene, world, quality);
 const campProps = createCampProps(scene, world, quality);
 const holdProps = createHoldProps(scene, world, quality);
@@ -2768,7 +2768,11 @@ function updateCamera(deltaTime, snap) {
   if (camera.position.y < minimumHeight) camera.position.y = minimumHeight;
   camera.lookAt(cameraFocus);
   camera.updateMatrixWorld();
-  if (!underground) world.terrain.follow(cameraFocus.x, cameraFocus.z);
+  if (!underground) {
+    world.terrain.follow(cameraFocus.x, cameraFocus.z);
+    props.follow(cameraFocus.x, cameraFocus.z);
+    life.follow(cameraFocus.x, cameraFocus.z);
+  }
   world.prepareAround(player.x, player.z);
   const reefInView = !underground && cameraFocus.z + cameraDistance * REEF_VIEW_REACH_PER_DISTANCE > REEF_VIEW_THRESHOLD_Z;
   cutawayUniforms.uCutCamera.value.copy(camera.position);
@@ -3411,7 +3415,7 @@ if (isScreenshotMode) {
     }
     for (let step = 0; step < momentSteps; step++) simulate(FIXED_STEP);
   } else if (pose.nearAnemone) {
-    const anemone = life.anemoneSpots.filter((candidate) => world.retained.levelAt(candidate.x, candidate.z) > -0.5).sort((first, second) => Math.hypot(first.x - spot.x, first.z - spot.z) - Math.hypot(second.x - spot.x, second.z - spot.z))[0];
+    const anemone = life.anemoneSpotsNear(spot.x, spot.z).filter((candidate) => world.retained.levelAt(candidate.x, candidate.z) > -0.5).sort((first, second) => Math.hypot(first.x - spot.x, first.z - spot.z) - Math.hypot(second.x - spot.x, second.z - spot.z))[0];
     const beside = navigation.nearestWalkable(anemone.x - 1.6, anemone.z - 0.4, 6);
     Object.assign(player, { x: beside.x, z: beside.z, heading: 1.3 });
     for (let step = 0; step < 30; step++) simulate(FIXED_STEP);
@@ -3449,7 +3453,7 @@ if (isScreenshotMode) {
 }
 
 window.__debug = {
-  hud, setShowPerformance, openStation, addBoardOrder, moveBoardOrder, removeBoardOrder, boardView, giveSatchel, boardOrders, processPanel, boardPanel, surfacePointAbovePlayer, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
+  props, life, hud, setShowPerformance, openStation, addBoardOrder, moveBoardOrder, removeBoardOrder, boardView, giveSatchel, boardOrders, processPanel, boardPanel, surfacePointAbovePlayer, simulate, simulationTime: () => simulationTime, player, world, resources, navigation, save, tideState, camera, renderer, scene, pipeline, performanceMonitor, quality, qualityName,
   tracks, ripples, hermit, gear, hitPlayer, strike, workshop, workbenchPanel, salvageItem, startMovingStructure, dismantleStructure, removeTravelPoint, startMovingExit, handleTravelAction, travelActions, moveStationTo, moveRackTo, isRecipeDiscovered, placement, cancelPlacement, backpack, openBackpack, buildWorkshop, craftItem, wearItem, unequipItem, walkToWorkshop, setDestination, setPaused, handleTap, renderScene, updateCamera, seaLevelAt,
   audio, isAudioUnlocked: () => audioUnlocked, progression, statusPanel, difficultyOf, experienceForKill, enemies, remains, engage, die, recoverRemains, playerStats, randomSource, upgradeTools, refineItem, modifyItem, startMolt, finishMolt, isMolting, isSoft, moltPanel, rack, rackPanel, buildRackStation, eatKelp, useConsumable, craftSupply, assignQuickSlot, quickSlots, isWellFed, walkToRack, helpers, helpersPanel, equipHelper, openMap, startFillMode, startFillCell, startSleeping, wakeUp, isRested, mapView, fog, exitCellProblem, chooseStation, nearestTravelPoint, rescueHelperAt, walkToStranded, burrow, storage, storagePanel, buildPanel, enterBurrow, exitBurrow, travel, travelOption, walkToShaft, cameraDistanceFor, getCameraDistance: () => cameraDistance, digEntranceAt, chooseEntranceSpot, startEntrancePlacement, buildStation, stationBuildProblem, burrowStage, rackSpotProblem, startDigCell, previewEntranceSpot, walkToEntrance, walkToStation, isUnderground: () => underground, entranceSpotProblem, wakeSpot, persist, startOver,
   setCameraDistance: (distance) => { cameraDistance = distance; },

@@ -1,9 +1,12 @@
 import * as THREE from 'three';
+import { PLAY_BOUNDS, boundsWidth, boundsDepth } from './worldBounds.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createRandom } from '../noise.js';
 import { applySeaside } from './seaside.js';
 import { TIDE_MIDDLE, TIDE_AMPLITUDE, isOnReef, isInCamp, isInHold } from './world.js';
 
+const AREA_ONE_ORIGINAL_PLAY_AREA = 236 * 236;
+const scaledCount = (type, count) => (CAMP_TYPES.has(type) || HOLD_TYPES.has(type) ? count : Math.round((count * boundsWidth(PLAY_BOUNDS) * boundsDepth(PLAY_BOUNDS)) / AREA_ONE_ORIGINAL_PLAY_AREA));
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 
 const DEFAULT_STACK_LIMIT = 50;
@@ -342,14 +345,15 @@ export function createResources(scene, overlay, world, quality, savedNodes, star
 
   for (const [type, definition] of Object.entries(RESOURCE_TYPES)) {
     if (!definition.count) continue;
+    const count = scaledCount(type, definition.count);
     const material = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: { shellBits: 0.3, pearls: 0.3, seaGlass: 0.18, coral: 0.65, scrap: 0.4, wax: 0.5 }[type] ?? 0.9, side: THREE.DoubleSide }), { wetDarkening: 0.9, wetRoughness: { shellBits: 0.15, pearls: 0.15, seaGlass: 0.08, coral: 0.4 }[type] ?? 0.8, causticStrength: 1.2, chromaticCaustics: quality.chromaticCaustics, glow: type === 'seaLettuce' ? 0.14 : 0.22, glowPulse: true });
-    const mesh = new THREE.InstancedMesh(geometries[type], material, definition.count);
+    const mesh = new THREE.InstancedMesh(geometries[type], material, count);
     mesh.castShadow = !REEF_TYPES.has(type) && !CAMP_TYPES.has(type) && !HOLD_TYPES.has(type);
     mesh.receiveShadow = true;
     mesh.frustumCulled = false;
     meshes[type] = mesh;
     scene.add(mesh);
-    for (let slot = 0; slot < definition.count; slot++) {
+    for (let slot = 0; slot < count; slot++) {
       const node = { id: `${type}-${slot}`, type, slot, x: 0, y: 0, z: 0, heading: 0, size: 1, gathered: false, sparkleIndex: nodes.length };
       nodes.push(node);
       sparklePositions.push(0, -999, 0);

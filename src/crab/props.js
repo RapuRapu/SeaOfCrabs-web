@@ -1,3 +1,4 @@
+import { createScatterLayer, attemptsFor } from './scatter.js';
 import * as THREE from 'three';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createNoise2D, createRandom, smoothstep } from '../noise.js';
@@ -109,50 +110,55 @@ function buildLogGeometry(log) {
   return geometry;
 }
 
-function buildPebbles(world, quality) {
-  const random = createRandom(404);
-  const wanted = Math.round(1800 * quality.density);
-  const material = applySeaside(new THREE.MeshStandardMaterial({ roughness: 0.8, vertexColors: true }), { surface: 'rock', wetDarkening: 0.55, wetRoughness: 0.34, chromaticCaustics: quality.chromaticCaustics });
-  const sizeClasses = [
-    { detail: 1, castShadow: false, matrices: [], colors: [] },
-    { detail: 2, castShadow: true, matrices: [], colors: [] },
-  ];
+const LOOSE_PEBBLE_ATTEMPTS_PER_AREA = 0.0483;
+const RING_PEBBLE_ATTEMPTS_PER_BOULDER = 60;
+const PEBBLE_RADIUS = 110;
+const PEBBLE_LAYER_SEED = 404;
+
+function pebbleAt(world, random, x, z, aroundBoulder) {
+  if (world.isInHold(x, z)) return null;
+  const height = world.heightAt(x, z);
+  const inPool = world.retained.levelAt(x, z) - height > 0.3;
+  const onStrandLine = Math.abs(height - (TIDE_MIDDLE + TIDE_AMPLITUDE + 0.5)) < 0.5 || Math.abs(height - TIDE_MIDDLE) < 0.35;
+  if (!aroundBoulder && !inPool && !onStrandLine && random() > 0.045) return null;
+  if (world.boulders.some((boulder) => Math.hypot(x - boulder.x, z - boulder.z) < boulder.radius * 0.9)) return null;
+  const size = 0.14 + random() * random() * 0.75;
   const transform = new THREE.Object3D();
-  const color = new THREE.Color();
-  let placed = 0;
-  let attempts = 0;
-  while (placed < wanted && attempts < wanted * 30) {
-    attempts++;
-    let x;
-    let z;
-    const aroundBoulder = random() < 0.22;
-    if (aroundBoulder) {
-      const boulder = world.boulders[Math.floor(random() * world.boulders.length)];
+  transform.position.set(x, height + size * 0.12, z);
+  transform.rotation.set(random() * 0.16, random() * Math.PI * 2, random() * 0.16);
+  transform.scale.set(size * (0.8 + random() * 0.6), size * (0.35 + random() * 0.3), size * (0.7 + random() * 0.5));
+  transform.updateMatrix();
+  const color = new THREE.Color().copy(PEBBLE_COLORS[Math.floor(random() * PEBBLE_COLORS.length)]).multiplyScalar(0.75 + random() * 0.5);
+  return { matrix: transform.matrix, color, sizeClass: size > 0.5 ? 1 : 0 };
+}
+
+function generatePebbles(world, quality, { minX, minZ, size, random, pointInside }) {
+  const pebbles = [];
+  for (const boulder of world.boulders) {
+    if (boulder.x < minX || boulder.x >= minX + size || boulder.z < minZ || boulder.z >= minZ + size) continue;
+    for (let attempt = 0; attempt < Math.round(RING_PEBBLE_ATTEMPTS_PER_BOULDER * quality.density); attempt++) {
       const angle = random() * Math.PI * 2;
       const distance = boulder.radius * (0.98 + random() * random() * 2.6);
-      x = boulder.x + Math.cos(angle) * distance;
-      z = boulder.z + Math.sin(angle) * distance;
-    } else {
-      x = (random() * 2 - 1) * 150;
-      z = (random() * 2 - 1) * 150;
+      const pebble = pebbleAt(world, random, boulder.x + Math.cos(angle) * distance, boulder.z + Math.sin(angle) * distance, true);
+      if (pebble) pebbles.push(pebble);
     }
-    if (world.isInHold(x, z)) continue;
-    const height = world.heightAt(x, z);
-    const inPool = world.retained.levelAt(x, z) - height > 0.3;
-    const onStrandLine = Math.abs(height - (TIDE_MIDDLE + TIDE_AMPLITUDE + 0.5)) < 0.5 || Math.abs(height - TIDE_MIDDLE) < 0.35;
-    if (!aroundBoulder && !inPool && !onStrandLine && random() > 0.045) continue;
-    if (world.boulders.some((boulder) => Math.hypot(x - boulder.x, z - boulder.z) < boulder.radius * 0.9)) continue;
-    const size = 0.14 + random() * random() * 0.75;
-    transform.position.set(x, height + size * 0.12, z);
-    transform.rotation.set(random() * 0.16, random() * Math.PI * 2, random() * 0.16);
-    transform.scale.set(size * (0.8 + random() * 0.6), size * (0.35 + random() * 0.3), size * (0.7 + random() * 0.5));
-    transform.updateMatrix();
-    const sizeClass = sizeClasses[size > 0.5 ? 1 : 0];
-    sizeClass.matrices.push(transform.matrix.clone());
-    sizeClass.colors.push(color.copy(PEBBLE_COLORS[Math.floor(random() * PEBBLE_COLORS.length)]).multiplyScalar(0.75 + random() * 0.5).clone());
-    placed++;
   }
-  return sizeClasses.map((sizeClass) => {
+  for (let attempt = attemptsFor(random, LOOSE_PEBBLE_ATTEMPTS_PER_AREA * quality.density); attempt > 0; attempt--) {
+    const [x, z] = pointInside();
+    const pebble = pebbleAt(world, random, x, z, false);
+    if (pebble) pebbles.push(pebble);
+  }
+  return pebbles;
+}
+
+function buildPebbles(world, quality) {
+  const material = applySeaside(new THREE.MeshStandardMaterial({ roughness: 0.8, vertexColors: true }), { surface: 'rock', wetDarkening: 0.55, wetRoughness: 0.34, chromaticCaustics: quality.chromaticCaustics });
+  const sizeClasses = [
+    { detail: 1, castShadow: false, capacity: 0, mesh: null },
+    { detail: 2, castShadow: true, capacity: 0, mesh: null },
+  ];
+  const group = new THREE.Group();
+  const geometries = sizeClasses.map((sizeClass) => {
     const geometry = smoothIcosphere(sizeClass.detail);
     const pebblePositions = geometry.attributes.position;
     const pebblePoint = new THREE.Vector3();
@@ -164,16 +170,36 @@ function buildPebbles(world, quality) {
     const undersideShade = new Float32Array(geometry.attributes.position.count * 3);
     for (let index = 0; index < geometry.attributes.position.count; index++) undersideShade.fill(0.5 + 0.5 * smoothstep(-0.55, 0.35, geometry.attributes.position.getY(index)), index * 3, index * 3 + 3);
     geometry.setAttribute('color', new THREE.BufferAttribute(undersideShade, 3));
-    const pebbles = new THREE.InstancedMesh(geometry, material, sizeClass.matrices.length);
-    sizeClass.matrices.forEach((matrix, index) => {
-      pebbles.setMatrixAt(index, matrix);
-      pebbles.setColorAt(index, sizeClass.colors[index]);
-    });
-    pebbles.receiveShadow = true;
-    pebbles.castShadow = sizeClass.castShadow;
-    pebbles.frustumCulled = false;
-    return pebbles;
+    return geometry;
   });
+
+  function show(pebbles) {
+    sizeClasses.forEach((sizeClass, classIndex) => {
+      const members = pebbles.filter((pebble) => pebble.sizeClass === classIndex);
+      if (members.length > sizeClass.capacity) {
+        if (sizeClass.mesh) {
+          group.remove(sizeClass.mesh);
+          sizeClass.mesh.dispose();
+        }
+        sizeClass.capacity = Math.ceil(members.length * 1.3);
+        sizeClass.mesh = new THREE.InstancedMesh(geometries[classIndex], material, sizeClass.capacity);
+        sizeClass.mesh.receiveShadow = true;
+        sizeClass.mesh.castShadow = sizeClass.castShadow;
+        sizeClass.mesh.frustumCulled = false;
+        group.add(sizeClass.mesh);
+      }
+      members.forEach((pebble, index) => {
+        sizeClass.mesh.setMatrixAt(index, pebble.matrix);
+        sizeClass.mesh.setColorAt(index, pebble.color);
+      });
+      sizeClass.mesh.count = members.length;
+      sizeClass.mesh.instanceMatrix.needsUpdate = true;
+      if (sizeClass.mesh.instanceColor) sizeClass.mesh.instanceColor.needsUpdate = true;
+    });
+  }
+
+  const layer = createScatterLayer({ seed: PEBBLE_LAYER_SEED, radius: PEBBLE_RADIUS, generate: (chunk) => generatePebbles(world, quality, chunk), onChange: show });
+  return { group, layer };
 }
 
 export function createProps(scene, world, quality) {
@@ -184,6 +210,7 @@ export function createProps(scene, world, quality) {
   solids.castShadow = true;
   solids.receiveShadow = true;
   scene.add(solids);
-  scene.add(...buildPebbles(world, quality));
-  return { solids };
+  const pebbles = buildPebbles(world, quality);
+  scene.add(pebbles.group);
+  return { solids, follow: (x, z) => pebbles.layer.follow(x, z) };
 }

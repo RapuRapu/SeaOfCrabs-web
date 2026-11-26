@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createRandom, createNoise2D } from '../noise.js';
 import { applySeaside, createMotionDepthMaterial } from './seaside.js';
+import { createScatterLayer, attemptsFor } from './scatter.js';
 
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 const SEAWEED_COLORS = [linearColor(0.2, 0.42, 0.14), linearColor(0.34, 0.5, 0.12), linearColor(0.5, 0.3, 0.14), linearColor(0.14, 0.34, 0.2)];
@@ -72,25 +73,36 @@ const bladeMotion = (floats) => ({
   `,
 });
 
-function buildBladeField(placements, colors, quality, { floats, castShadow, widthSegments, lengthSegments }) {
+function buildBladeField(colors, quality, { floats, castShadow, widthSegments, lengthSegments }) {
   const strip = new THREE.PlaneGeometry(1, 1, widthSegments, lengthSegments).translate(0, 0.5, 0);
   const geometry = new THREE.InstancedBufferGeometry();
   geometry.index = strip.index;
   geometry.setAttribute('position', strip.attributes.position);
   geometry.setAttribute('normal', strip.attributes.normal);
-  const roots = new Float32Array(placements.length * 3);
-  const blades = new Float32Array(placements.length * 4);
-  const tints = new Float32Array(placements.length * 3);
-  placements.forEach((placement, index) => {
-    roots.set([placement.x, placement.y, placement.z], index * 3);
-    blades.set([placement.length, placement.width, placement.angle, placement.phase], index * 4);
-    const tint = colors[placement.colorIndex % colors.length];
-    tints.set([tint.r * placement.shade, tint.g * placement.shade, tint.b * placement.shade], index * 3);
-  });
-  geometry.setAttribute('aRoot', new THREE.InstancedBufferAttribute(roots, 3));
-  geometry.setAttribute('aBlade', new THREE.InstancedBufferAttribute(blades, 4));
-  geometry.setAttribute('color', new THREE.InstancedBufferAttribute(tints, 3));
-  geometry.instanceCount = placements.length;
+  let capacity = 0;
+  function setPlacements(placements) {
+    if (capacity === 0 || placements.length > capacity) {
+      capacity = Math.ceil(Math.max(64, placements.length * 1.3));
+      geometry.dispose();
+      geometry.setAttribute('aRoot', new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3));
+      geometry.setAttribute('aBlade', new THREE.InstancedBufferAttribute(new Float32Array(capacity * 4), 4));
+      geometry.setAttribute('color', new THREE.InstancedBufferAttribute(new Float32Array(capacity * 3), 3));
+    }
+    const roots = geometry.attributes.aRoot;
+    const blades = geometry.attributes.aBlade;
+    const tints = geometry.attributes.color;
+    placements.forEach((placement, index) => {
+      roots.setXYZ(index, placement.x, placement.y, placement.z);
+      blades.setXYZW(index, placement.length, placement.width, placement.angle, placement.phase);
+      const tint = colors[placement.colorIndex % colors.length];
+      tints.setXYZ(index, tint.r * placement.shade, tint.g * placement.shade, tint.b * placement.shade);
+    });
+    roots.needsUpdate = true;
+    blades.needsUpdate = true;
+    tints.needsUpdate = true;
+    geometry.instanceCount = placements.length;
+  }
+  setPlacements([]);
   const motion = bladeMotion(floats);
   const material = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: floats ? 0.7 : 0.7, side: THREE.DoubleSide }), { wetDarkening: floats ? 1.0 : 0.85, wetRoughness: floats ? 0.7 : 0.3, causticStrength: 1.6, chromaticCaustics: quality.chromaticCaustics, glow: floats ? 0.1 : 0.06, vertexMotion: motion });
   const seasideCompile = material.onBeforeCompile;
@@ -105,15 +117,29 @@ function buildBladeField(placements, colors, quality, { floats, castShadow, widt
   mesh.receiveShadow = true;
   mesh.castShadow = castShadow;
   if (castShadow) mesh.customDepthMaterial = createMotionDepthMaterial(motion);
-  return mesh;
+  return { mesh, setPlacements };
 }
 
-function seaweedPlacements(world, quality) {
-  const random = createRandom(909);
+const SEAWEED_ATTEMPTS_PER_AREA = 0.0253;
+const GRASS_ATTEMPTS_PER_AREA = 0.0472;
+const STARFISH_ATTEMPTS_PER_AREA = 0.00257;
+const ANEMONE_ATTEMPTS_PER_AREA = 0.0124;
+const BLADE_RADIUS = 150;
+const CREATURE_RADIUS = 110;
+const grassClumpNoise = createNoise2D(88);
+
+function walkableSpot(world, chunk, accept) {
+  const [x, z] = chunk.pointInside();
+  if (!world.isWalkable(x, z)) return null;
+  const height = world.heightAt(x, z);
+  return accept(x, z, height) ? { x, z, y: height } : null;
+}
+
+function seaweedPlacements(world, quality, chunk) {
+  const { random } = chunk;
   const placements = [];
-  const clusterCount = Math.round(70 * quality.density);
-  for (let cluster = 0; cluster < clusterCount; cluster++) {
-    const spot = world.randomSpot(random, (x, z, height) => world.retained.levelAt(x, z) - height > 1.0 || (height < -3.0 && height > -6.0 && !world.isOnReef(x, z)));
+  for (let attempt = attemptsFor(random, SEAWEED_ATTEMPTS_PER_AREA * quality.density); attempt > 0; attempt--) {
+    const spot = walkableSpot(world, chunk, (x, z, height) => world.retained.levelAt(x, z) - height > 1.0 || (height < -3.0 && height > -6.0 && !world.isOnReef(x, z)));
     if (!spot) continue;
     const bladeCount = 5 + Math.floor(random() * 9);
     const colorIndex = Math.floor(random() * SEAWEED_COLORS.length);
@@ -128,23 +154,16 @@ function seaweedPlacements(world, quality) {
   return placements;
 }
 
-function grassPlacements(world, quality) {
-  const random = createRandom(515);
-  const clumpNoise = createNoise2D(88);
+function grassPlacements(world, quality, chunk) {
+  const { random } = chunk;
   const placements = [];
-  const wantedTufts = Math.round(950 * quality.density);
-  let tufts = 0;
-  let attempts = 0;
-  while (tufts < wantedTufts && attempts < wantedTufts * 40) {
-    attempts++;
-    const centerX = (random() * 2 - 1) * 170;
-    const centerZ = -55 - random() * 125;
+  for (let attempt = attemptsFor(random, GRASS_ATTEMPTS_PER_AREA * quality.density); attempt > 0; attempt--) {
+    const [centerX, centerZ] = chunk.pointInside();
     const centerHeight = world.heightAt(centerX, centerZ);
-    const duneCover = THREE.MathUtils.smoothstep(centerHeight, 3.4, 6.5) * (0.3 + 0.7 * THREE.MathUtils.smoothstep(clumpNoise(centerX * 0.06, centerZ * 0.06), -0.25, 0.3));
+    const duneCover = THREE.MathUtils.smoothstep(centerHeight, 3.4, 6.5) * (0.3 + 0.7 * THREE.MathUtils.smoothstep(grassClumpNoise(centerX * 0.06, centerZ * 0.06), -0.25, 0.3));
     if (random() > duneCover) continue;
     if (world.boulders.some((boulder) => Math.hypot(centerX - boulder.x, centerZ - boulder.z) < boulder.radius * 1.05)) continue;
     if (world.isInHold(centerX, centerZ) || world.isInCamp(centerX, centerZ)) continue;
-    tufts++;
     const tuftHeight = 3 + random() * random() * 8;
     const colorIndex = Math.floor(random() * 3);
     const bladeCount = 10 + Math.floor(random() * 9);
@@ -328,34 +347,68 @@ function buildFishSchool(world, quality) {
 }
 
 export function createLife(scene, world, quality) {
-  scene.add(buildBladeField(seaweedPlacements(world, quality), SEAWEED_COLORS, quality, { floats: true, castShadow: false, widthSegments: SEAWEED_WIDTH_SEGMENTS, lengthSegments: SEAWEED_LENGTH_SEGMENTS }));
-  scene.add(buildBladeField(grassPlacements(world, quality), GRASS_COLORS, quality, { floats: false, castShadow: quality.grassShadows, widthSegments: 1, lengthSegments: GRASS_BLADE_SEGMENTS }));
+  const seaweedField = buildBladeField(SEAWEED_COLORS, quality, { floats: true, castShadow: false, widthSegments: SEAWEED_WIDTH_SEGMENTS, lengthSegments: SEAWEED_LENGTH_SEGMENTS });
+  const grassField = buildBladeField(GRASS_COLORS, quality, { floats: false, castShadow: quality.grassShadows, widthSegments: 1, lengthSegments: GRASS_BLADE_SEGMENTS });
+  scene.add(seaweedField.mesh, grassField.mesh);
+  const seaweedLayer = createScatterLayer({ seed: 909, radius: BLADE_RADIUS, generate: (chunk) => seaweedPlacements(world, quality, chunk), onChange: seaweedField.setPlacements });
+  const grassLayer = createScatterLayer({ seed: 515, radius: BLADE_RADIUS, generate: (chunk) => grassPlacements(world, quality, chunk), onChange: grassField.setPlacements });
 
-  const random = createRandom(77);
   const starfishColors = [linearColor(0.95, 0.42, 0.16), linearColor(0.82, 0.2, 0.24), linearColor(0.6, 0.3, 0.62), linearColor(0.98, 0.66, 0.2)];
   const anemoneColors = [linearColor(0.8, 0.42, 0.5), linearColor(0.42, 0.7, 0.62), linearColor(0.8, 0.58, 0.34), linearColor(0.58, 0.46, 0.76)];
-  const starfish = [];
-  const anemones = [];
-  const anemoneSpots = [];
   const inPoolShallows = (x, z, height) => world.retained.levelAt(x, z) - height > 0.25;
   const inPoolDepths = (x, z, height) => world.retained.levelAt(x, z) - height > 1.2;
-  for (let index = 0; index < Math.round(16 * quality.density); index++) {
-    const spot = world.randomSpot(random, index % 3 === 0 ? (x, z, height) => height > -2.4 && height < -0.6 : inPoolShallows);
-    if (spot) starfish.push(buildStarfishGeometry(spot, 0.9 + random() * 0.8, random() * 6.28, starfishColors[index % starfishColors.length]));
-  }
-  for (let index = 0; index < Math.round(30 * quality.density); index++) {
-    const spot = world.randomSpot(random, inPoolDepths);
-    if (!spot) continue;
-    anemoneSpots.push(spot);
-    anemones.push(buildAnemoneGeometry(spot, 0.8 + random() * 0.9, anemoneColors[index % anemoneColors.length]));
-  }
-  const starfishMesh = new THREE.Mesh(mergeGeometries(starfish), applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }), { wetDarkening: 0.8, wetRoughness: 0.25, chromaticCaustics: quality.chromaticCaustics, vertexMotion: starfishMotion }));
+  const onLowShore = (x, z, height) => height > -2.4 && height < -0.6;
+
+  const starfishMesh = new THREE.Mesh(new THREE.BufferGeometry(), applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.6 }), { wetDarkening: 0.8, wetRoughness: 0.25, chromaticCaustics: quality.chromaticCaustics, vertexMotion: starfishMotion }));
   starfishMesh.castShadow = true;
   starfishMesh.customDepthMaterial = createMotionDepthMaterial(starfishMotion);
   starfishMesh.receiveShadow = true;
-  const anemoneMesh = new THREE.Mesh(mergeGeometries(anemones), applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5 }), { wetDarkening: 1, causticStrength: 1.4, chromaticCaustics: false, glow: 0.22, vertexMotion: anemoneMotion }));
+  starfishMesh.frustumCulled = false;
+  const anemoneMesh = new THREE.Mesh(new THREE.BufferGeometry(), applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.5 }), { wetDarkening: 1, causticStrength: 1.4, chromaticCaustics: false, glow: 0.22, vertexMotion: anemoneMotion }));
   anemoneMesh.castShadow = true;
   anemoneMesh.customDepthMaterial = createMotionDepthMaterial(anemoneMotion);
+  anemoneMesh.frustumCulled = false;
+
+  const mergeInto = (mesh) => (creatures) => {
+    mesh.geometry.dispose();
+    mesh.geometry = creatures.length ? mergeGeometries(creatures.map((creature) => creature.geometry)) : new THREE.BufferGeometry();
+    mesh.visible = creatures.length > 0;
+  };
+  const starfishLayer = createScatterLayer({
+    seed: 77,
+    radius: CREATURE_RADIUS,
+    onChange: mergeInto(starfishMesh),
+    generate(chunk) {
+      const creatures = [];
+      for (let attempt = attemptsFor(chunk.random, STARFISH_ATTEMPTS_PER_AREA * quality.density); attempt > 0; attempt--) {
+        const spot = walkableSpot(world, chunk, chunk.random() < 1 / 3 ? onLowShore : inPoolShallows);
+        if (spot) creatures.push({ spot, geometry: buildStarfishGeometry(spot, 0.9 + chunk.random() * 0.8, chunk.random() * 6.28, starfishColors[Math.floor(chunk.random() * starfishColors.length)]) });
+      }
+      return creatures;
+    },
+  });
+  const anemoneLayer = createScatterLayer({
+    seed: 78,
+    radius: CREATURE_RADIUS,
+    onChange: mergeInto(anemoneMesh),
+    generate(chunk) {
+      const creatures = [];
+      for (let attempt = attemptsFor(chunk.random, ANEMONE_ATTEMPTS_PER_AREA * quality.density); attempt > 0; attempt--) {
+        const spot = walkableSpot(world, chunk, inPoolDepths);
+        if (spot) creatures.push({ spot, geometry: buildAnemoneGeometry(spot, 0.8 + chunk.random() * 0.9, anemoneColors[Math.floor(chunk.random() * anemoneColors.length)]) });
+      }
+      return creatures;
+    },
+  });
   scene.add(starfishMesh, anemoneMesh, buildFishSchool(world, quality));
-  return { anemoneSpots };
+
+  function follow(x, z) {
+    seaweedLayer.follow(x, z);
+    grassLayer.follow(x, z);
+    starfishLayer.follow(x, z);
+    anemoneLayer.follow(x, z);
+  }
+
+  const anemoneSpotsNear = (x, z, searchRadius = 80) => anemoneLayer.itemsAround(x, z, searchRadius).map((creature) => creature.spot);
+  return { follow, anemoneSpotsNear };
 }
