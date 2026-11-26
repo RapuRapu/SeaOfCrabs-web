@@ -139,6 +139,7 @@ export function createHud(activeQualityName) {
   document.addEventListener('webkitfullscreenchange', refreshFullscreenButton);
   const resetButton = element('button', 'reset', pauseCard, 'Start over');
   element('div', 'pause-note', pauseCard, 'The game saves on its own.');
+  element('div', 'pause-note build-info', pauseCard, typeof __BUILD_INFO__ === 'string' ? __BUILD_INFO__ : 'Development build');
 
   let pauseListener = () => {};
   let resetListener = () => {};
