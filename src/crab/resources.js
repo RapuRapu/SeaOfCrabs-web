@@ -1,12 +1,16 @@
 import * as THREE from 'three';
-import { PLAY_BOUNDS, boundsWidth, boundsDepth } from './worldBounds.js';
+import { PLAY_BOUNDS, boundsWidth } from './worldBounds.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createRandom } from '../noise.js';
 import { applySeaside } from './seaside.js';
-import { TIDE_MIDDLE, TIDE_AMPLITUDE, isOnReef, isInCamp, isInHold } from './world.js';
+import { TIDE_MIDDLE, TIDE_AMPLITUDE, isOnReef, isInCamp, isInHold, CAMP_AREA, HOLD_AREA, REEF_AREA } from './world.js';
 
-const AREA_ONE_ORIGINAL_PLAY_AREA = 236 * 236;
-const scaledCount = (type, count) => (CAMP_TYPES.has(type) || HOLD_TYPES.has(type) ? count : Math.round((count * boundsWidth(PLAY_BOUNDS) * boundsDepth(PLAY_BOUNDS)) / AREA_ONE_ORIGINAL_PLAY_AREA));
+const SHOWN_RADIUS = 150;
+const SHOWN_REFRESH_DISTANCE = 24;
+const HOME_FOCUS = { x: 0, z: 0 };
+const AREA_ONE_ORIGINAL_WIDTH = 236;
+const REEF_AREA_GROWTH = 4.7;
+const scaledCount = (type, count) => (CAMP_TYPES.has(type) || HOLD_TYPES.has(type) ? count : Math.round(count * (REEF_TYPES.has(type) ? REEF_AREA_GROWTH : boundsWidth(PLAY_BOUNDS) / AREA_ONE_ORIGINAL_WIDTH)));
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 
 const DEFAULT_STACK_LIMIT = 50;
@@ -370,20 +374,47 @@ export function createResources(scene, overlay, world, quality, savedNodes, star
   sparkles.renderOrder = 2;
   overlay.scene.add(sparkles);
 
-  function refresh(node) {
+  const shownNodes = Object.fromEntries(Object.keys(meshes).map((type) => [type, []]));
+  let shownAround = null;
+
+  function writeInstance(node, x, y, z, scale) {
     const mesh = meshes[node.type];
-    transform.position.set(node.x, node.gathered ? -999 : node.y, node.z);
+    if (node.instanceIndex === undefined) return;
+    transform.position.set(x, y, z);
     transform.rotation.set(0, node.heading, 0);
-    transform.scale.setScalar(node.size);
+    transform.scale.setScalar(scale);
     transform.updateMatrix();
-    mesh.setMatrixAt(node.slot, transform.matrix);
+    mesh.setMatrixAt(node.instanceIndex, transform.matrix);
     mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  function refresh(node) {
+    writeInstance(node, node.x, node.gathered ? -999 : node.y, node.z, node.size);
     sparkleGeometry.attributes.position.setXYZ(node.sparkleIndex, node.x, node.gathered ? -999 : node.y + (node.type === 'seaLettuce' ? 1.7 : 1.05), node.z);
     sparkleGeometry.attributes.position.needsUpdate = true;
   }
 
+  function showAround(x, z) {
+    shownAround = { x, z };
+    for (const [type, mesh] of Object.entries(meshes)) {
+      for (const node of shownNodes[type]) node.instanceIndex = undefined;
+      shownNodes[type] = nodes.filter((node) => node.type === type && Math.hypot(node.x - x, node.z - z) < SHOWN_RADIUS);
+      shownNodes[type].forEach((node, index) => {
+        node.instanceIndex = index;
+        refresh(node);
+      });
+      mesh.count = shownNodes[type].length;
+    }
+  }
+
+  function follow(x, z) {
+    if (!shownAround || Math.hypot(x - shownAround.x, z - shownAround.z) > SHOWN_REFRESH_DISTANCE) showAround(x, z);
+  }
+
+  const searchAreaOf = (type) => (CAMP_TYPES.has(type) ? CAMP_AREA : HOLD_TYPES.has(type) ? HOLD_AREA : REEF_TYPES.has(type) ? REEF_AREA : PLAY_BOUNDS);
+
   function relocate(node, avoid) {
-    const spot = world.randomSpot(random, (x, z, height) => accepts[node.type](x, z, height) && (HOLD_TYPES.has(node.type) || !isInHold(x, z)) && !nodes.some((other) => other !== node && !other.gathered && Math.hypot(other.x - x, other.z - z) < 5) && (!avoid || Math.hypot(avoid.x - x, avoid.z - z) > 14));
+    const spot = world.randomSpot(random, (x, z, height) => accepts[node.type](x, z, height) && (HOLD_TYPES.has(node.type) || !isInHold(x, z)) && !nodes.some((other) => other !== node && !other.gathered && Math.hypot(other.x - x, other.z - z) < 5) && (!avoid || Math.hypot(avoid.x - x, avoid.z - z) > 14), 400, searchAreaOf(node.type));
     if (!spot) return false;
     Object.assign(node, { x: spot.x, y: spot.y, z: spot.z, heading: random() * Math.PI * 2, size: (node.type === 'shellBits' ? 0.6 : 0.85) + random() * 0.35, gathered: false });
     return true;
@@ -394,18 +425,13 @@ export function createResources(scene, overlay, world, quality, savedNodes, star
     const starter = node.slot === 0 ? starterSpots[node.type] : null;
     if (saved) Object.assign(node, saved, { y: world.heightAt(saved.x, saved.z) });
     else if (starter) Object.assign(node, { x: starter.x, y: world.heightAt(starter.x, starter.z), z: starter.z, heading: random() * Math.PI * 2, size: 1.1 });
-    else relocate(node, null);
+    else if (!relocate(node, null)) node.gathered = true;
     refresh(node);
   }
+  showAround(HOME_FOCUS.x, HOME_FOCUS.z);
 
   function hold(node, x, y, z, scale) {
-    const mesh = meshes[node.type];
-    transform.position.set(x, y, z);
-    transform.rotation.set(0, node.heading, 0);
-    transform.scale.setScalar(node.size * scale);
-    transform.updateMatrix();
-    mesh.setMatrixAt(node.slot, transform.matrix);
-    mesh.instanceMatrix.needsUpdate = true;
+    writeInstance(node, x, y, z, node.size * scale);
     sparkleGeometry.attributes.position.setXYZ(node.sparkleIndex, 0, -999, 0);
     sparkleGeometry.attributes.position.needsUpdate = true;
   }
@@ -426,6 +452,7 @@ export function createResources(scene, overlay, world, quality, savedNodes, star
       if (relocate(node, avoid)) returned++;
       refresh(node);
     }
+    if (shownAround) showAround(shownAround.x, shownAround.z);
     return returned;
   }
 
@@ -452,5 +479,5 @@ export function createResources(scene, overlay, world, quality, savedNodes, star
     for (const type of HOLD_TYPES) meshes[type].visible = visible;
   }
 
-  return { nodes, gather, hold, release, washAshore, update, serialize, setReefVisible, setCampVisible, setHoldVisible };
+  return { nodes, gather, hold, release, washAshore, update, serialize, setReefVisible, setCampVisible, setHoldVisible, follow };
 }

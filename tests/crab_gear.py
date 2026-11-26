@@ -127,7 +127,7 @@ with sync_playwright() as playwright:
     page.reload()
     page.wait_for_function('!!window.__debug', timeout=180000)
     restored = page.evaluate("() => { const d = __debug; return { version: d.save.version, built: d.workshop.built && d.burrow.hasStation('workshop'), spotBlocked: !d.world.isWalkable(18, -17), worn: d.gear.wornShell().kind, claws: d.gear.wornClaws().kind, shells: d.gear.state.shells.length } }")
-    checks['saveRestores'] = {**restored, 'pass': restored == {'version': 6, 'built': True, 'spotBlocked': True, 'worn': 'cone', 'claws': 'shellEdged', 'shells': 3}}
+    checks['saveRestores'] = {**restored, 'pass': restored == {'version': 7, 'built': True, 'spotBlocked': True, 'worn': 'cone', 'claws': 'shellEdged', 'shells': 3}}
 
     legacy_context = browser.new_context(viewport={'width': 915, 'height': 412})
     legacy_context.add_init_script("localStorage.setItem('seaofcrabs-crab-save', JSON.stringify({ version: 1, x: 20, z: -30, heading: 1, worldTime: 100, inventory: { shellBits: 4, driftwood: 2 }, nodes: null, goalAnnounced: false, hasMoved: true }))")

@@ -1,5 +1,6 @@
-export const WORLD_BOUNDS = { minX: -128, maxX: 128, minZ: -128, maxZ: 128 };
-export const PLAY_BOUNDS = { minX: -118, maxX: 118, minZ: -118, maxZ: 118 };
+export const PLAY_BOUNDS = { minX: -384, maxX: 384, minZ: -256, maxZ: 256 };
+const WORLD_MARGIN = 10;
+export const WORLD_BOUNDS = { minX: PLAY_BOUNDS.minX - WORLD_MARGIN, maxX: PLAY_BOUNDS.maxX + WORLD_MARGIN, minZ: PLAY_BOUNDS.minZ - WORLD_MARGIN, maxZ: PLAY_BOUNDS.maxZ + WORLD_MARGIN };
 
 export const boundsWidth = (bounds) => bounds.maxX - bounds.minX;
 export const boundsDepth = (bounds) => bounds.maxZ - bounds.minZ;

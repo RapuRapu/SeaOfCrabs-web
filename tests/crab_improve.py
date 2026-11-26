@@ -170,7 +170,7 @@ with sync_playwright() as playwright:
     page.wait_for_function('!!window.__debug', timeout=180000)
     reloaded = page.evaluate('''() => { const d = window.__debug; const shell = d.gear.wornShell(); const claws = d.gear.wornClaws(); return { tools: d.gear.state.toolTier, shell: shell && `${shell.kind}:${shell.quality}:${shell.reinforcement}`, claws: `${claws.kind}:${claws.quality}:${claws.binding}`, skill: d.progression.state.clawSkill, molts: d.progression.state.molts.length, version: d.save.version }; }''')
     print('reloaded', json.dumps(reloaded), flush=True)
-    checks['saved'] = reloaded == {'tools': 2, 'shell': 'turban:masterwork:boneSpikes', 'claws': 'shellEdged:masterwork:kelp', 'skill': 9.5, 'molts': 3, 'version': 6}
+    checks['saved'] = reloaded == {'tools': 2, 'shell': 'turban:masterwork:boneSpikes', 'claws': 'shellEdged:masterwork:kelp', 'skill': 9.5, 'molts': 3, 'version': 7}
     context.close()
 
     old = browser.new_context(viewport={'width': 915, 'height': 412})

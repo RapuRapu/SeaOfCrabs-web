@@ -28,8 +28,9 @@ TERRAIN = r'''
   for (let x = -100; x <= 100; x += 10) { dropSamples++; if (!w.isWalkable(x, 116) && w.heightAt(x, 116) < -5) dropBlocked++; }
   out.dropBlocked = `${dropBlocked}/${dropSamples}`;
   out.reefPools = w.pools.filter((p) => p.onReef).map((p) => ({ x: p.x, z: p.z, retained: +p.retainedLevel.toFixed(2), centerDepth: +(w.retained.levelAt(p.x, p.z) - w.heightAt(p.x, p.z)).toFixed(2), holdsAtLowTide: p.retainedLevel > d.seaLevelAt(480 * 0.75) }));
+  d.save.worldTime = 300; d.simulate(1 / 60);
   const home = { x: d.player.x, z: d.player.z };
-  const targets = [[0, 80], [-60, 96], [80, 92], [20, 104], [-100, 70]];
+  const targets = [[0, 80], [-250, 160], [80, 92], [20, 104], [-100, 70]];
   out.paths = targets.map(([x, z]) => { const spot = d.navigation.nearestWalkable(x, z, 8); const path = spot ? d.navigation.findPath(home.x, home.z, spot.x, spot.z) : []; return { x, z, length: path.length }; });
   const props = w.reefProps;
   out.props = Object.fromEntries(Object.entries(props).map(([kind, list]) => [kind, list.length]));
@@ -109,9 +110,9 @@ with sync_playwright() as playwright:
     checks['plateauHeights'] = -3.6 < terrain['heights']['p05'] and terrain['heights']['max'] <= -1.1 and 0.15 <= terrain['exposedAtLowTide'] <= 0.5 and terrain['submergedAtMidTide'] > 0.95
     checks['walkableAndReachable'] = terrain['walkableShare'] > 0.7 and all(p['length'] > 0 for p in terrain['paths'])
     checks['dropOffEdge'] = terrain['dropBlocked'] == '21/21'
-    checks['reefPoolsHoldWater'] = len(terrain['reefPools']) == 3 and all(p['holdsAtLowTide'] and p['centerDepth'] > 2 for p in terrain['reefPools'])
-    checks['props'] = terrain['props'] == {'brainCoral': 30, 'barnacleRock': 26, 'branchCoral': 72, 'urchin': 40} and terrain['urchinsBlock']
-    checks['reefResources'] = terrain['reefNodeCounts'] == {'coral': 12, 'seaGlass': 8} and terrain['reefNodesOnReef'] and terrain['reefNodesReachable'] == 20 and abs(terrain['starterCoral']['x'] - 14) < 0.01
+    checks['reefPoolsHoldWater'] = len(terrain['reefPools']) == 5 and all(p['holdsAtLowTide'] and p['centerDepth'] > 2 for p in terrain['reefPools'])
+    checks['props'] = terrain['props'] == {'brainCoral': 135, 'barnacleRock': 117, 'branchCoral': 324, 'urchin': 180} and terrain['urchinsBlock']
+    checks['reefResources'] = terrain['reefNodeCounts'] == {'coral': 56, 'seaGlass': 38} and terrain['reefNodesOnReef'] and terrain['reefNodesReachable'] == 94 and abs(terrain['starterCoral']['x'] - 14) < 0.01
     checks['beachUnchanged'] = terrain['homeItemsOffReef'] == 0 and terrain['shoreCrabsOffReef'] == 0
     flow = page.evaluate(FLOW)
     print(json.dumps(flow))

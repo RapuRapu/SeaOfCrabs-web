@@ -4,7 +4,7 @@ import { createPerformanceMonitor } from '../performance.js';
 import { QUALITY_LEVELS, chosenQualityName, storeQualityName } from './quality.js';
 import { seaUniforms, SEA_COMMON_GLSL, lighting, cutawayUniforms } from './seaside.js';
 import { createNoiseTexture, createWaveGradientTexture } from './textures.js';
-import { createWorld, TIDE_MIDDLE, TIDE_AMPLITUDE, TIDE_PERIOD_SECONDS, HOME_BEACH_ENEMIES, REEF_ENEMIES, CAMP_ENEMIES, CAMP, isInCamp, HOLD_ENEMIES, HOLD, isInHold, PLAY_BOUNDS } from './world.js';
+import { createWorld, TIDE_MIDDLE, TIDE_AMPLITUDE, TIDE_PERIOD_SECONDS, HOME_BEACH_ENEMIES, REEF_ENEMIES, CAMP_ENEMIES, CAMP, isInCamp, HOLD_ENEMIES, HOLD, isInHold, PLAY_BOUNDS, relocateLegacyPoint } from './world.js';
 import { isInsideBounds } from './worldBounds.js';
 import { createPipeline } from './pipeline.js';
 import { createWater } from './water.js';
@@ -39,7 +39,7 @@ import { PROCESS_RECIPES, isProcessStation, loadStation, collectStation, tickSta
 import { createRack, RACK_BATCH, RACK_DRY_SECONDS, RACK_REACH, RACK_BLOCK_RADIUS, rackInputIn } from './rack.js';
 import { createHelpers, HELPER_LIMIT, helperStats, helperMaxHealth, HELPER_MEAL_SECONDS, SATCHEL_LOAD, SATCHEL_CORD_COST } from './helpers.js';
 import { itemName } from './itemInfo.js';
-import { createFog } from './fog.js';
+import { createFog, remapFog } from './fog.js';
 import { createMapView } from './mapView.js';
 
 const searchParameters = new URLSearchParams(location.search);
@@ -49,7 +49,9 @@ const qualityName = chosenQualityName(searchParameters);
 const quality = QUALITY_LEVELS[qualityName];
 
 const SAVE_KEY = 'seaofcrabs-crab-save';
-const SAVE_VERSION = 6;
+const SAVE_VERSION = 7;
+const CAMP_NOTICE_MARGIN = 6;
+const AREA_ONE_FIRST_PLAY_BOUNDS = { minX: -118, maxX: 118, minZ: -118, maxZ: 118 };
 const CLAW_GROWTH_PER_MOLT = 0.05;
 const AUTOSAVE_INTERVAL_SECONDS = 5;
 const FIXED_STEP = 1 / 60;
@@ -76,6 +78,7 @@ const WET_SAND_DRYING_RATE = 0.006;
 const HOME_SPOT = { x: 13, z: -21 };
 const STARTING_REVEAL_RADIUS = 34;
 const STARTING_BEACH_REVEAL_RADIUS = 70;
+const STARTING_REEF_REVEAL_RADIUS = 140;
 const WORKSHOP_SPOT = { x: 18, z: -17 };
 const FIRST_GOAL = { shellBits: 5, driftwood: 3, seaLettuce: 3 };
 const REEF_VIEW_THRESHOLD_Z = 42;
@@ -90,7 +93,7 @@ const HOLD_RIM_POINTS = Array.from({ length: HOLD_RIM_SAMPLES * 2 }, (_, index) 
 const viewFrustum = new THREE.Frustum();
 const frustumMatrix = new THREE.Matrix4();
 const REEF_VIEW_REACH_PER_DISTANCE = 1.6;
-const STARTER_SPOTS = { shellBits: { x: 11, z: -26.5 }, driftwood: { x: 17.5, z: -23 }, seaLettuce: { x: 12, z: -14 }, coral: { x: 14, z: 57 }, scrap: { x: -74, z: -34 }, fishBone: { x: 79, z: -55 } };
+const STARTER_SPOTS = Object.fromEntries(Object.entries({ shellBits: { x: 11, z: -26.5 }, driftwood: { x: 17.5, z: -23 }, seaLettuce: { x: 12, z: -14 }, coral: { x: 14, z: 57 }, scrap: { x: -74, z: -34 }, fishBone: { x: 79, z: -55 } }).map(([type, spot]) => [type, relocateLegacyPoint(spot.x, spot.z)]));
 const FAR_ZOOM_RING_DISTANCES = [46, 66];
 const STARTING_HEADING = 2.3;
 const BODY_WET_MINIMUM_DEPTH = 0.04;
@@ -268,6 +271,11 @@ const POSES = {
   126: { x: -60, z: 91, distance: 28, tideShare: 0.75, heading: 0.2, level: 10, outfit: { shell: 'coral', claws: 'coralTipped', quality: 'fine' }, revealAround: 60, enemy: { kind: 'giantLobster', offsetX: -2, offsetZ: 6.5, loot: { big: 'cleaver' } } },
   128: { x: -1, z: -6, distance: 6, tideShare: 0.75, heading: 0.4, level: 9, enemy: { kind: 'shoreCrab', offsetX: -1.8, offsetZ: 0.4, loot: { big: 'coralTipped', small: 'shellEdged' } } },
   129: { x: -60, z: 91, distance: 16, tideShare: 0.75, heading: 0.2, level: 10, revealAround: 60, outfit: { shell: 'coral', claws: 'coralTipped', quality: 'fine' }, enemy: { kind: 'giantLobster', offsetX: -1, offsetZ: 5, loot: { big: 'cleaver' } } },
+  140: { x: 172, z: 14, distance: 60, tideShare: 0.75, heading: 1.6, revealAround: 140 },
+  141: { x: 172, z: 14, distance: 60, tideShare: 0.25, heading: 1.6, revealAround: 140 },
+  142: { x: -196, z: 0, distance: 40, tideShare: 0.56, heading: 0.4, revealAround: 120 },
+  143: { x: 160, z: -120, distance: 75, tideShare: 0.56, heading: 1.6, revealAround: 160 },
+  144: { x: -230, z: -120, distance: 80, tideShare: 0.56, heading: 3.6, revealAround: 160 },
   130: { x: 10, z: 80, distance: 9, tideShare: 0.75, heading: 0.4, level: 8, revealAround: 60, enemy: { kind: 'octopus', offsetX: 2.2, offsetZ: 2.2, loot: { shell: 'turban' } } },
   131: { x: 15, z: -20, distance: 6, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 1.2, offsetZ: -1.8, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } } },
   132: { x: 13, z: -9, distance: 9, tideShare: 0.56, heading: 0.2 },
@@ -287,6 +295,12 @@ function migrateSave(stored) {
   const gearItemCount = stored.gear ? stored.gear.shells.length + stored.gear.claws.length : 0;
   const migrated = { ...createEmptySave(), ...stored, version: SAVE_VERSION };
   if (stored.version < 3) migrated.craftedOnce = gearItemCount > 2;
+  if (stored.version < 7) {
+    if (stored.fog) migrated.fog = remapFog(stored.fog, AREA_ONE_FIRST_PLAY_BOUNDS, PLAY_BOUNDS);
+    migrated.remains = (stored.remains || []).map((entry) => ({ ...entry, ...relocateLegacyPoint(entry.x, entry.z) }));
+    if (Number.isFinite(stored.x) && Number.isFinite(stored.z)) Object.assign(migrated, relocateLegacyPoint(stored.x, stored.z));
+    migrated.nodes = null;
+  }
   if (stored.workshopBuilt && !stored.burrow) {
     migrated.burrow = { ...createEmptyBurrow(), entrance: { ...WORKSHOP_SPOT }, stations: [{ kind: 'workshop', ...DEFAULT_WORKSHOP_CELL }] };
   }
@@ -339,6 +353,7 @@ const canvas = renderer.domElement;
 
 seaUniforms.uNoise.value = createNoiseTexture();
 const world = createWorld(quality);
+world.updateSeaLevel(seaLevelAt(save.worldTime));
 seaUniforms.uRetained.value = world.retained.texture;
 
 const scene = new THREE.Scene();
@@ -417,7 +432,7 @@ function applyWornLook() {
 applyWornLook();
 const resources = createResources(scene, { scene: pipeline.overlayScene, uniforms: pipeline.overlayUniforms }, world, quality, save.nodes, STARTER_SPOTS);
 const hud = createHud(qualityName);
-const mapView = createMapView(hud.root, { world, fog, halfSize: PLAY_BOUNDS.maxX, waterLevel: TIDE_MIDDLE + TIDE_AMPLITUDE, cameraYaw: CAMERA_YAW, onClose: () => mapView.close() });
+const mapView = createMapView(hud.root, { world, fog, bounds: PLAY_BOUNDS, waterLevel: TIDE_MIDDLE + TIDE_AMPLITUDE, cameraYaw: CAMERA_YAW, onClose: () => mapView.close() });
 const tracks = createTracks(scene, world);
 const ripples = createRipples(water.uniforms);
 const workshop = createWorkbenchModel(scene, world, quality, WORKSHOP_SPOT, hud.root);
@@ -1046,10 +1061,28 @@ function updateTide(deltaTime) {
   tideState.wetLevel = Math.max(level + 0.42, tideState.wetLevel - WET_SAND_DRYING_RATE * deltaTime);
   seaUniforms.uSeaLevel.value = tideState.seaLevel;
   seaUniforms.uWetLevel.value = tideState.wetLevel;
+  if (world.updateSeaLevel(level) && !world.isSandbarOpen()) washOffSandbar();
   if (wasRising && !tideState.rising && deltaTime > 0) {
     const returned = resources.washAshore(player);
     if (returned > 0) hud.log('loot', 'The tide left new things on the beach');
   }
+}
+
+function blockedByTide(point) {
+  if (underground || world.isSandbarOpen()) return false;
+  world.updateSeaLevel(TIDE_MIDDLE - TIDE_AMPLITUDE);
+  const reachableAtLowTide = space().findPath(player.x, player.z, point.x, point.z).length > 0;
+  world.updateSeaLevel(seaLevelAt(save.worldTime));
+  return reachableAtLowTide;
+}
+
+function washOffSandbar() {
+  if (underground || !world.isTidal(player.x, player.z)) return;
+  const shore = navigation.nearestWalkable(player.x, player.z, 40);
+  if (!shore) return;
+  Object.assign(player, { x: shore.x, z: shore.z, y: world.heightAt(shore.x, shore.z) });
+  stopWalking();
+  hud.log('notice', 'The rising tide swept you off the sandbar');
 }
 
 function tideLabel() {
@@ -1427,7 +1460,7 @@ function noticeHold() {
 }
 
 function noticeCamp() {
-  if (save.campFound || underground || !isInCamp(player.x, player.z)) return;
+  if (save.campFound || underground || Math.hypot(player.x - CAMP.x, player.z - CAMP.z) > CAMP.radius + CAMP_NOTICE_MARGIN) return;
   save.campFound = true;
   hud.log('discovery', 'A pirate camp! Giants sleep here — mind the rats and the cat');
   refreshHud(null);
@@ -2770,8 +2803,12 @@ function updateCamera(deltaTime, snap) {
   camera.updateMatrixWorld();
   if (!underground) {
     world.terrain.follow(cameraFocus.x, cameraFocus.z);
+    water.follow(cameraFocus.x, cameraFocus.z);
+    if (snap) reefProps.buildAround(cameraFocus.x);
+    else reefProps.follow(cameraFocus.x);
     props.follow(cameraFocus.x, cameraFocus.z);
     life.follow(cameraFocus.x, cameraFocus.z);
+    resources.follow(cameraFocus.x, cameraFocus.z);
   }
   world.prepareAround(player.x, player.z);
   const reefInView = !underground && cameraFocus.z + cameraDistance * REEF_VIEW_REACH_PER_DISTANCE > REEF_VIEW_THRESHOLD_Z;
@@ -3064,7 +3101,7 @@ function handleTap(clientX, clientY, isNewTouch) {
     return;
   }
   const point = groundPointUnder(clientX, clientY);
-  if (point && !setDestination(point.x, point.z) && isNewTouch) hud.log('notice', "Can't find a way there");
+  if (point && !setDestination(point.x, point.z) && isNewTouch) hud.log('notice', blockedByTide(point) ? 'The tide covers the sandbar — cross at low tide' : "Can't find a way there");
 }
 
 const activePointers = new Map();
@@ -3236,7 +3273,7 @@ function revealStartingFog() {
   if (save.campFound) regionsVisited.add('camp');
   if (save.holdFound) regionsVisited.add('hold');
   const returningPlayer = save.hasMoved || burrow.exists;
-  if (returningPlayer) fog.revealWhere((x, z) => regionsVisited.has(regionAt(x, z)) && Math.hypot(x - HOME_SPOT.x, z - HOME_SPOT.z) < (regionAt(x, z) === 'beach' ? STARTING_BEACH_REVEAL_RADIUS : Infinity));
+  if (returningPlayer) fog.revealWhere((x, z) => regionsVisited.has(regionAt(x, z)) && Math.hypot(x - HOME_SPOT.x, z - HOME_SPOT.z) < (regionAt(x, z) === 'beach' ? STARTING_BEACH_REVEAL_RADIUS : regionAt(x, z) === 'reef' ? STARTING_REEF_REVEAL_RADIUS : Infinity));
   fog.reveal(HOME_SPOT.x, HOME_SPOT.z, STARTING_REVEAL_RADIUS);
   if (burrow.exists) fog.reveal(burrow.state.entrance.x, burrow.state.entrance.z, STARTING_REVEAL_RADIUS);
 }
@@ -3248,7 +3285,10 @@ tideState.wetLevel = TIDE_MIDDLE + TIDE_AMPLITUDE * 0.9;
 let previousFrameTime = performance.now();
 
 if (isScreenshotMode) {
-  const pose = POSES[screenshotPose] || POSES[1];
+  const authoredPose = POSES[screenshotPose] || POSES[1];
+  const pose = { ...authoredPose, ...relocateLegacyPoint(authoredPose.x, authoredPose.z) };
+  if (authoredPose.walkFrom) pose.walkFrom = relocateLegacyPoint(authoredPose.walkFrom.x, authoredPose.walkFrom.z);
+  if (authoredPose.remainsAt) pose.remainsAt = relocateLegacyPoint(authoredPose.remainsAt.x, authoredPose.remainsAt.z);
   hud.setVisible(searchParameters.has('hud'));
   performanceMonitor.setVisible(false);
   const spot = navigation.nearestWalkable(pose.x, pose.z, 40);
@@ -3378,6 +3418,7 @@ if (isScreenshotMode) {
   }
   const poseSlot = pose.selectSlot && hud.root.querySelector(`.backpack .slot-grid [data-slot-key]:nth-child(${pose.selectSlot})`);
   if (poseSlot) backpack.select(poseSlot.dataset.slotKey);
+  if (pose.revealAround && !pose.enemy) fog.reveal(spot.x, spot.z, pose.revealAround);
   if (pose.walkFrom) {
     const walkStart = navigation.nearestWalkable(pose.walkFrom.x, pose.walkFrom.z, 40);
     Object.assign(player, { x: walkStart.x, z: walkStart.z });

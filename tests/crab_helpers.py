@@ -124,7 +124,7 @@ with sync_playwright() as playwright:
     old.wait_for_function('!!window.__debug', timeout=180000)
     migrated = old.evaluate("() => { const d = window.__debug; const nest = d.burrow.state.stations.find((s) => s.kind === 'helperNest'); return { version: d.save.version, nest: Boolean(nest), housed: d.helpers.list.every((h) => nest && h.nestId === nest.id), jobs: d.helpers.list.map((h) => h.job), stranded: d.helpers.strandedVisible().length, workshopDug: d.burrow.isDug(6, 5), fogStart: d.fog.isRevealed(13, -21) }; }")
     print(json.dumps({'migrated': migrated}), flush=True)
-    checks['migratesOldHelpers'] = migrated == {'version': 6, 'nest': True, 'housed': True, 'jobs': ['shellBits', 'driftwood'], 'stranded': 4, 'workshopDug': True, 'fogStart': True}
+    checks['migratesOldHelpers'] = migrated == {'version': 7, 'nest': True, 'housed': True, 'jobs': ['shellBits', 'driftwood'], 'stranded': 4, 'workshopDug': True, 'fogStart': True}
     legacy.close()
 
     mobile = browser.new_context(viewport={'width': 412, 'height': 915}, is_mobile=True, has_touch=True, device_scale_factor=2)

@@ -390,6 +390,8 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
   const hidden = new THREE.Matrix4().makeScale(0, 0, 0);
   const labelPoint = new THREE.Vector3();
   let nextId = 1;
+  const activityCenter = { x: 0, z: 0 };
+  const restingFarAway = (enemy) => (enemy.state === 'idle' || enemy.state === 'circling') && Math.hypot(activityCenter.x - enemy.x, activityCenter.z - enemy.z) > ENEMY_ACTIVE_RADIUS;
   let calmUntil = 0;
 
   function spawnSpot(entry, avoid, near = null) {
@@ -398,8 +400,9 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       return free.length ? free[Math.floor(random() * free.length)] : null;
     }
     for (let attempt = 0; attempt < 600; attempt++) {
-      const x = near ? near.x + (random() * 2 - 1) * PACK_SPREAD : THREE.MathUtils.lerp(PLAY_BOUNDS.minX, PLAY_BOUNDS.maxX, random());
-      const z = near ? near.z + (random() * 2 - 1) * PACK_SPREAD : THREE.MathUtils.lerp(PLAY_BOUNDS.minZ, PLAY_BOUNDS.maxZ, random());
+      const area = entry.area || PLAY_BOUNDS;
+      const x = near ? near.x + (random() * 2 - 1) * PACK_SPREAD : THREE.MathUtils.lerp(area.minX, area.maxX, random());
+      const z = near ? near.z + (random() * 2 - 1) * PACK_SPREAD : THREE.MathUtils.lerp(area.minZ, area.maxZ, random());
       if (!world.isWalkable(x, z)) continue;
       const height = world.heightAt(x, z);
       if (!entry.accept(world, x, z, height)) continue;
@@ -891,6 +894,8 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
 
   function update(deltaTime, time, player) {
     lastTime = time;
+    activityCenter.x = player.x;
+    activityCenter.z = player.z;
     for (const enemy of list) {
       if (enemy.state === 'dead') {
         if (enemy.definition.dailyBoss) {
@@ -916,8 +921,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
         }
         continue;
       }
-      const resting = enemy.state === 'idle' || enemy.state === 'circling';
-      if (resting && Math.hypot(player.x - enemy.x, player.z - enemy.z) > ENEMY_ACTIVE_RADIUS) continue;
+      if (restingFarAway(enemy)) continue;
       enemy.strike = Math.max(0, enemy.strike - deltaTime * 3);
       const idleSound = IDLE_SOUNDS[enemy.kind];
       if (idleSound && (enemy.state === 'idle' || enemy.state === 'circling') && random() < idleSound.perSecond * deltaTime) onSound(idleSound.name, enemy);
@@ -961,7 +965,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
   function placeCreature(enemy, scale) {
     const { object } = enemy.creature;
     const region = MODEL_REPLACES[enemy.kind] && MODEL_REPLACES[enemy.kind].region;
-    object.visible = enemy.state !== 'dead' && (!region || regionVisible[region]);
+    object.visible = enemy.state !== 'dead' && (!region || regionVisible[region]) && !restingFarAway(enemy);
     object.position.copy(transform.position);
     object.rotation.copy(transform.rotation);
     object.scale.setScalar(scale);
@@ -1125,7 +1129,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
   function renderRivalHermit(enemy, time) {
     const crab = enemy.hermit;
     rivalCullSphere.center.set(enemy.x, enemy.y, enemy.z);
-    crab.root.visible = enemy.state !== 'dead' && viewFrustum.intersectsSphere(rivalCullSphere);
+    crab.root.visible = enemy.state !== 'dead' && !restingFarAway(enemy) && viewFrustum.intersectsSphere(rivalCullSphere);
     if (!crab.root.visible) return;
     const deltaTime = enemy.lastRenderTime === undefined ? 0 : Math.min(0.1, Math.max(0, time - enemy.lastRenderTime));
     enemy.lastRenderTime = time;
@@ -1424,6 +1428,8 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
   }
 
   function render(time, camera, playerTargetId, viewer) {
+    activityCenter.x = viewer.x;
+    activityCenter.z = viewer.z;
     const placedLabels = [];
     viewMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     viewFrustum.setFromProjectionMatrix(viewMatrix);

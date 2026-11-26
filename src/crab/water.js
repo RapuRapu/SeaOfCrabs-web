@@ -179,5 +179,9 @@ export function createWater(waveGradientTexture, overlayUniforms, rippleCapacity
   const mesh = new THREE.Mesh(buildSeaGeometry(), material);
   mesh.frustumCulled = false;
   mesh.renderOrder = 1;
-  return { mesh, uniforms };
+  const snapStep = (NEAR_HALF_SIZE * 2) / NEAR_SEGMENTS;
+  function follow(x, z) {
+    mesh.position.set(Math.round(x / snapStep) * snapStep, 0, Math.round(z / snapStep) * snapStep);
+  }
+  return { mesh, uniforms, follow };
 }

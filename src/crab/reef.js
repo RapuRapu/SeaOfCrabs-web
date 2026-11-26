@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { PLAY_BOUNDS, boundsWidth } from './worldBounds.js';
 import { mergeGeometries, mergeVertices } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createNoise2D, createRandom, smoothstep } from '../noise.js';
 import { applySeaside } from './seaside.js';
@@ -27,12 +28,16 @@ const URCHIN_BODY = linearColor(0.14, 0.05, 0.16);
 const URCHIN_SPINE_TIP = linearColor(0.42, 0.2, 0.5);
 
 const UP = new THREE.Vector3(0, 1, 0);
-const REEF_CHUNK_COUNT = 3;
+const REEF_CHUNK_COUNT = 10;
 const RUBBLE_HIGHEST_FLOOR = -2.6;
+const RUBBLE_AREA_SCALE = 4.5;
+const REEF_BUILD_REACH = 160;
+const REEF_PIECES_PER_FRAME = 12;
+const RUBBLE_WEST_REACH = 84;
 const CORAL_TIP_TAPER = 0.42;
 const CORAL_CAP_FLATTEN = 0.85;
 const CORAL_JOINT_SINK = 1.2;
-const REEF_CHUNK_SPAN = 236;
+const REEF_CHUNK_SPAN = boundsWidth(PLAY_BOUNDS);
 const reefPropNoise = createNoise2D(311);
 const lumpAt = (x, y, z, frequency) => (reefPropNoise(x * frequency + 3.1, y * frequency) + reefPropNoise(y * frequency + 7.7, z * frequency) + reefPropNoise(z * frequency + 1.3, x * frequency + 5.2)) / 3;
 
@@ -170,12 +175,12 @@ function buildUrchin(prop, spineCount) {
 
 function buildRubble(world, quality) {
   const random = createRandom(8080);
-  const wanted = Math.round(300 * quality.density);
+  const wanted = Math.round(300 * RUBBLE_AREA_SCALE * quality.density);
   const pieces = [];
   const palette = [ROCK_GREY, ROCK_PALE, BRANCH_CORAL_PALETTES[2][1], BRAIN_CORAL_PALETTES[0][0], linearColor(0.9, 0.86, 0.78)];
   for (let attempt = 0; attempt < wanted * 20 && pieces.length < wanted; attempt++) {
-    const x = (random() * 2 - 1) * 116;
-    const z = 46 + random() * 66;
+    const x = THREE.MathUtils.lerp(PLAY_BOUNDS.minX + 2, PLAY_BOUNDS.maxX - 2, random());
+    const z = 46 + random() * (66 + RUBBLE_WEST_REACH);
     if (!world.isOnReef(x, z) || !world.isWalkable(x, z)) continue;
     const height = world.heightAt(x, z);
     if (height < -3.6 || height > RUBBLE_HIGHEST_FLOOR) continue;
@@ -204,34 +209,62 @@ export function createReefProps(scene, world, quality) {
     barnacleRock: (prop) => buildBarnacleRock(prop, 2),
     urchin: (prop) => buildUrchin(prop, detailed ? 28 : 20),
   };
-  const chunks = Array.from({ length: REEF_CHUNK_COUNT }, () => []);
+  const chunkBuilders = Array.from({ length: REEF_CHUNK_COUNT }, () => []);
   const chunkOf = (x) => THREE.MathUtils.clamp(Math.floor(((x + REEF_CHUNK_SPAN / 2) / REEF_CHUNK_SPAN) * REEF_CHUNK_COUNT), 0, REEF_CHUNK_COUNT - 1);
   for (const [kind, props] of Object.entries(world.reefProps)) {
-    for (const prop of props) {
-      const geometry = builders[kind](prop);
-      geometry.rotateY(prop.heading).translate(prop.x, prop.y - 0.1, prop.z);
-      chunks[chunkOf(prop.x)].push(geometry);
-    }
+    for (const prop of props) chunkBuilders[chunkOf(prop.x)].push(() => builders[kind](prop).rotateY(prop.heading).translate(prop.x, prop.y - 0.1, prop.z));
   }
   for (const den of world.morayDens) {
-    const denGeometry = mergeVertices(buildDenGeometry(), 1e-4).scale(MORAY_DEN_SCALE, MORAY_DEN_SCALE, MORAY_DEN_SCALE).translate(den.x, world.heightAt(den.x, den.z), den.z);
-    chunks[chunkOf(den.x)].push(denGeometry);
+    chunkBuilders[chunkOf(den.x)].push(() => mergeVertices(buildDenGeometry(), 1e-4).scale(MORAY_DEN_SCALE, MORAY_DEN_SCALE, MORAY_DEN_SCALE).translate(den.x, world.heightAt(den.x, den.z), den.z));
   }
   for (const piece of buildRubble(world, quality)) {
     piece.computeBoundingBox();
-    chunks[chunkOf(piece.boundingBox.min.x)].push(piece);
+    chunkBuilders[chunkOf(piece.boundingBox.min.x)].push(() => piece);
   }
   const material = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.78, side: THREE.DoubleSide }), { surface: null, wetDarkening: 0.5, wetRoughness: 0.32, causticStrength: 1.4, chromaticCaustics: quality.chromaticCaustics });
-  const meshes = chunks.filter((pieces) => pieces.length).map((pieces) => {
+  const meshes = [];
+  const built = new Set();
+  let reefVisible = true;
+
+  let job = null;
+
+  function finishChunk(index, pieces) {
+    built.add(index);
+    if (!pieces.length) return;
     const mesh = new THREE.Mesh(mergeGeometries(pieces), material);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
+    mesh.visible = reefVisible;
     scene.add(mesh);
-    return mesh;
-  });
+    meshes.push(mesh);
+  }
+
+  function follow(x, { piecesPerFrame = REEF_PIECES_PER_FRAME } = {}) {
+    if (!job) {
+      const wanted = [chunkOf(x), chunkOf(x - REEF_BUILD_REACH), chunkOf(x + REEF_BUILD_REACH)].find((index) => !built.has(index));
+      if (wanted === undefined) return;
+      job = { index: wanted, pieces: [], next: 0 };
+    }
+    const builders = chunkBuilders[job.index];
+    const end = Math.min(builders.length, job.next + piecesPerFrame);
+    for (; job.next < end; job.next++) job.pieces.push(builders[job.next]());
+    if (job.next >= builders.length) {
+      finishChunk(job.index, job.pieces);
+      job = null;
+    }
+  }
+
+  function buildAround(x) {
+    while (true) {
+      follow(x, { piecesPerFrame: Infinity });
+      if (!job && [chunkOf(x), chunkOf(x - REEF_BUILD_REACH), chunkOf(x + REEF_BUILD_REACH)].every((index) => built.has(index))) return;
+    }
+  }
+
   function setVisible(visible) {
+    reefVisible = visible;
     for (const mesh of meshes) mesh.visible = visible;
   }
 
-  return { meshes, setVisible };
+  return { meshes, setVisible, follow, buildAround };
 }

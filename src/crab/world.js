@@ -2,15 +2,17 @@ import * as THREE from 'three';
 import { createNoise2D, createRandom, fractalNoise, smoothstep, lerp } from '../noise.js';
 import { WORLD_BOUNDS, PLAY_BOUNDS, boundsWidth, boundsDepth } from './worldBounds.js';
 import { createTerrain } from './terrain.js';
-import { SHORE, POOLS, REEF_INNER_EDGE_Z, REEF_OUTER_EDGE_Z, REEF_DROP_LENGTH, REEF_EDGE_RAGGEDNESS, REEF_FLAT_HEIGHT, REEF_HIGHEST, BOULDERS, DRIFT_LOGS, LOBSTER_LAIR, REEF_PROP_KEEP_CLEAR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS } from './worldMap.js';
+import { WEST_REEF, DEEP_REEF, CHANNEL, SANDBAR, CAMP_FLAT, GULL_PERCHES, relocateLegacyPoint, SHORE, POOLS, REEF_INNER_EDGE_Z, REEF_OUTER_EDGE_Z, REEF_DROP_LENGTH, REEF_EDGE_RAGGEDNESS, REEF_FLAT_HEIGHT, REEF_HIGHEST, BOULDERS, DRIFT_LOGS, LOBSTER_LAIR, REEF_PROP_KEEP_CLEAR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS } from './worldMap.js';
 
-export { WORLD_BOUNDS, PLAY_BOUNDS, LOBSTER_LAIR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS };
+export { relocateLegacyPoint, WORLD_BOUNDS, PLAY_BOUNDS, LOBSTER_LAIR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS };
 export const DEEP_WATER_HEIGHT = -6.2;
 export const TIDE_MIDDLE = -0.9;
 export const TIDE_AMPLITUDE = 1.7;
 export const TIDE_PERIOD_SECONDS = 480;
 
 const NO_RETAINED_WATER = -100;
+const POOL_OUTLINE_MAX_STRETCH = 1.27;
+const POOL_INFLUENCE_LIMIT = 1.45 * POOL_OUTLINE_MAX_STRETCH;
 const MAX_WALKABLE_SLOPE = 1.25;
 const RETAINED_BELOW_CREST = 0.5;
 const SHORE_DILATION_CELLS = 6;
@@ -20,7 +22,8 @@ const poolNoise = createNoise2D(23);
 const reefNoise = createNoise2D(131);
 
 const reefInnerEdgeAt = (x) => REEF_INNER_EDGE_Z + 6 * reefNoise(x * 0.035, 1.7);
-export const reefOuterEdgeAt = (x) => REEF_OUTER_EDGE_Z + 4 * reefNoise(x * 0.05, 9.3) + 1.6 * reefNoise(x * 0.17, 4.1);
+export const reefOuterEdgeAt = (x) => REEF_OUTER_EDGE_Z + 4 * reefNoise(x * 0.05, 9.3) + 1.6 * reefNoise(x * 0.17, 4.1) + WEST_REEF.extraReach * smoothstep(WEST_REEF.startX, WEST_REEF.fullX, x);
+const deepReefShareAt = (z) => smoothstep(DEEP_REEF.startZ, DEEP_REEF.fullZ, z);
 
 export function reefShareAt(x, z) {
   return smoothstep(reefInnerEdgeAt(x) - 8, reefInnerEdgeAt(x) + 4, z) * (1 - smoothstep(reefOuterEdgeAt(x), reefOuterEdgeAt(x) + 1.5, z));
@@ -35,6 +38,7 @@ function reefHeight(x, z, beach) {
   let flat = REEF_FLAT_HEIGHT + 1.3 * fractalNoise(reefNoise, x * 0.035, z * 0.035, 3) + 0.4 * fractalNoise(reefNoise, x * 0.11 + 30, z * 0.11, 2);
   flat += 0.55 * smoothstep(outerEdge - 12, outerEdge - 3, z) * (0.6 + 0.4 * reefNoise(x * 0.09, 5.5));
   flat = Math.min(flat, REEF_HIGHEST - 0.1 * reefNoise(x * 0.3, z * 0.3));
+  flat -= DEEP_REEF.extraDepth * deepReefShareAt(z);
   const ragged = REEF_EDGE_RAGGEDNESS * fractalNoise(reefNoise, x * 0.14 + 70, z * 0.14, 3);
   const dropShare = smoothstep(outerEdge + ragged, outerEdge + ragged + REEF_DROP_LENGTH * 2.2, z);
   return lerp(flat, Math.min(beach, DEEP_WATER_HEIGHT - 5), dropShare);
@@ -61,6 +65,7 @@ function poolShape(pool, x, z) {
 export function heightAt(x, z) {
   let height = beachHeight(x, z);
   for (const pool of POOLS) {
+    if (Math.hypot((x - pool.x) / pool.radiusX, (z - pool.z) / pool.radiusZ) > POOL_INFLUENCE_LIMIT) continue;
     const rimDistance = poolShape(pool, x, z);
     if (rimDistance > 1.45) continue;
     const crest = Math.max(pool.crest + 0.22 * poolNoise(x * 0.09, z * 0.09), height);
@@ -68,13 +73,47 @@ export function heightAt(x, z) {
     const basin = lerp(floor, crest, smoothstep(0.38, 1, rimDistance));
     height = lerp(basin, height, smoothstep(1, 1.45, rimDistance));
   }
+  return shapeLandmarks(x, z, height);
+}
+
+const channelNoise = createNoise2D(211);
+const CHANNEL_BANK_WIDENING_PER_HEIGHT = 2.2;
+const TIDAL_GROUND_ABOVE_SANDBAR = 1.2;
+export const channelCenterAt = (z) => CHANNEL.centerX + CHANNEL.wiggle * Math.sin(z * 0.021);
+const channelHalfWidthAt = (z) => CHANNEL.halfWidth * (0.85 + 0.3 * channelNoise(z * 0.03, 0.5));
+
+export function isTidalGround(x, z, height) {
+  return height < SANDBAR.top + TIDAL_GROUND_ABOVE_SANDBAR && Math.abs(x - channelCenterAt(z)) < channelHalfWidthAt(z) + CHANNEL.bankWidth && z > CHANNEL.inlandEndZ;
+}
+
+let campLevel = null;
+
+function shapeLandmarks(x, z, height) {
+  const fromCamp = Math.hypot(x - CAMP.x, z - CAMP.z);
+  if (fromCamp < CAMP.radius * CAMP_FLAT.outerShare) {
+    if (campLevel === null) campLevel = beachHeight(CAMP.x, CAMP.z);
+    height = lerp(campLevel, height, smoothstep(CAMP.radius * CAMP_FLAT.innerShare, CAMP.radius * CAMP_FLAT.outerShare, fromCamp));
+  }
+  const across = Math.abs(x - channelCenterAt(z));
+  const halfWidth = channelHalfWidthAt(z);
+  const bankWidth = CHANNEL.bankWidth + CHANNEL_BANK_WIDENING_PER_HEIGHT * Math.max(0, height);
+  if (across > halfWidth + bankWidth || z < CHANNEL.inlandEndZ) return height;
+  const channelShare = 1 - smoothstep(halfWidth, halfWidth + bankWidth, across);
+  height = lerp(height, Math.min(height, CHANNEL.floor + 0.6 * channelNoise(x * 0.08, z * 0.08)), channelShare);
+  const barShare = 1 - smoothstep(SANDBAR.halfLength, SANDBAR.halfLength + SANDBAR.rampLength, Math.abs(z - SANDBAR.z + 1.5 * channelNoise(x * 0.07, 3.3)));
+  if (barShare > 0) height = Math.max(height, lerp(height, SANDBAR.top + 0.25 * channelNoise(x * 0.2, z * 0.2), barShare));
   return height;
 }
+
+export const isSandbarOpen = (seaLevel) => seaLevel < SANDBAR.top + SANDBAR.openBelowTop;
+
+
 
 const COLLISION_CELL_SIZE = 256 / 384;
 const COLLISION_CHUNK_CELLS = 48;
 const RETAINED_CELL_SIZE = 1;
 const WALK_CHUNK_CELLS = 32;
+const TIDAL_CELL = 2;
 
 function buildCollisionField() {
   const cellSize = COLLISION_CELL_SIZE;
@@ -267,6 +306,7 @@ function buildRetainedWater() {
   return { texture, levelAt, pools };
 }
 
+const REEF_PROP_AREA_SCALE = 4.5;
 const REEF_PROP_KINDS = [
   { kind: 'brainCoral', count: 30, radius: [1.0, 2.3], blockShare: 0.95 },
   { kind: 'barnacleRock', count: 26, radius: [0.9, 2.0], blockShare: 0.95 },
@@ -274,7 +314,7 @@ const REEF_PROP_KINDS = [
   { kind: 'urchin', count: 40, radius: [0.5, 0.75], blockShare: 1.6 },
 ];
 const REEF_PROP_CLEARANCE = 2.2;
-const MORAY_DEN_COUNT = 4;
+const MORAY_DEN_COUNT = 10;
 const MORAY_DEN_SPACING = 30;
 
 function placeReefProps(sampleHeight, boulders) {
@@ -283,13 +323,14 @@ function placeReefProps(sampleHeight, boulders) {
   const props = {};
   for (const definition of REEF_PROP_KINDS) {
     props[definition.kind] = [];
-    for (let attempt = 0; attempt < definition.count * 60 && props[definition.kind].length < definition.count; attempt++) {
+    const wanted = Math.round(definition.count * REEF_PROP_AREA_SCALE);
+    for (let attempt = 0; attempt < wanted * 60 && props[definition.kind].length < wanted; attempt++) {
       const x = lerp(PLAY_BOUNDS.minX + 6, PLAY_BOUNDS.maxX - 6, random());
-      const z = REEF_INNER_EDGE_Z - 4 + random() * (REEF_OUTER_EDGE_Z - REEF_INNER_EDGE_Z + 4);
+      const z = REEF_INNER_EDGE_Z - 4 + random() * (REEF_OUTER_EDGE_Z + WEST_REEF.extraReach - REEF_INNER_EDGE_Z + 4);
       const radius = lerp(definition.radius[0], definition.radius[1], random());
       if (!isOnReef(x, z) || z > reefOuterEdgeAt(x) - 2) continue;
       const height = sampleHeight(x, z);
-      if (height < -3.4 || height > REEF_HIGHEST + 0.2) continue;
+      if (height < -3.4 - DEEP_REEF.extraDepth * deepReefShareAt(z) || height > REEF_HIGHEST + 0.2) continue;
       if (boulders.some((boulder) => Math.hypot(x - boulder.x, z - boulder.z) < boulder.radius + radius + 2)) continue;
       if (REEF_PROP_KEEP_CLEAR.some((spot) => Math.hypot(x - spot.x, z - spot.z) < spot.radius + radius)) continue;
       if (placed.some((other) => Math.hypot(x - other.x, z - other.z) < other.radius + radius + REEF_PROP_CLEARANCE)) continue;
@@ -380,8 +421,13 @@ export function isInHold(x, z) {
   return dx * dx + dz * dz < 0.92;
 }
 
+const areaAround = (x, z, halfWidth, halfDepth) => ({ minX: x - halfWidth, maxX: x + halfWidth, minZ: z - halfDepth, maxZ: z + halfDepth });
+export const CAMP_AREA = areaAround(CAMP.x, CAMP.z, CAMP.radius, CAMP.radius);
+export const HOLD_AREA = areaAround(HOLD.x, HOLD.z, HOLD.halfLength, HOLD.halfWidth);
+export const REEF_AREA = { minX: PLAY_BOUNDS.minX, maxX: PLAY_BOUNDS.maxX, minZ: REEF_INNER_EDGE_Z - 10, maxZ: REEF_OUTER_EDGE_Z + WEST_REEF.extraReach + 6 };
+
 export function isInCamp(x, z) {
-  return Math.hypot(x - CAMP.x, z - CAMP.z) < CAMP.radius && z > -91;
+  return Math.hypot(x - CAMP.x, z - CAMP.z) < CAMP.radius && z > CAMP.z + CAMP.backEdgeOffset;
 }
 
 function collectStaticBlockers(boulders, logs, reefProps) {
@@ -441,7 +487,7 @@ function buildWalkability(ground, staticBlockers) {
         if (height < DEEP_WATER_HEIGHT) continue;
         const slope = Math.hypot(ground.heightAt(x + 0.6, z) - ground.heightAt(x - 0.6, z), ground.heightAt(x, z + 0.6) - ground.heightAt(x, z - 0.6)) / 1.2;
         if (slope > MAX_WALKABLE_SLOPE) continue;
-        walkable[row * columns + column] = 1;
+        walkable[row * columns + column] = isTidalGround(x, z, height) ? TIDAL_CELL : 1;
       }
     }
     for (const disc of blockersByChunk[chunkRow * chunkColumns + chunkColumn]) blockDiscWithin(disc, firstColumn, lastColumn, firstRow, lastRow);
@@ -453,10 +499,23 @@ function buildWalkability(ground, staticBlockers) {
     if (!chunkReady[chunk]) computeChunk(chunk % chunkColumns, Math.floor(chunk / chunkColumns));
   }
 
+  let tidalPassOpen = true;
+
   function isCellWalkable(column, row) {
     if (!grid.contains(column, row)) return false;
     ensureCell(column, row);
-    return walkable[row * columns + column] === 1;
+    const cell = walkable[row * columns + column];
+    return cell === 1 || (cell === TIDAL_CELL && tidalPassOpen);
+  }
+
+  function isCellTidal(column, row) {
+    if (!grid.contains(column, row)) return false;
+    ensureCell(column, row);
+    return walkable[row * columns + column] === TIDAL_CELL;
+  }
+
+  function setTidalPassOpen(open) {
+    tidalPassOpen = open;
   }
 
   function ensureRange(firstColumn, lastColumn, firstRow, lastRow) {
@@ -505,7 +564,7 @@ function buildWalkability(ground, staticBlockers) {
     return computed;
   }
 
-  return { grid, isCellWalkable, blockCircle, unblockCells, prepareAround };
+  return { grid, isCellWalkable, isCellTidal, setTidalPassOpen, blockCircle, unblockCells, prepareAround };
 }
 
 export function createWorld(quality) {
@@ -524,14 +583,25 @@ export function createWorld(quality) {
     return walkability.isCellWalkable(walkGrid.columnOf(x), walkGrid.rowOf(z));
   }
 
+  const isTidal = (x, z) => walkability.isCellTidal(walkGrid.columnOf(x), walkGrid.rowOf(z));
+
+  function updateSeaLevel(seaLevel) {
+    const open = isSandbarOpen(seaLevel);
+    const changed = open !== sandbarOpen;
+    sandbarOpen = open;
+    walkability.setTidalPassOpen(open);
+    return changed;
+  }
+  let sandbarOpen = true;
+
   function waterLevelAt(x, z, seaLevel) {
     return Math.max(seaLevel, retained.levelAt(x, z));
   }
 
-  function randomSpot(random, accept, attempts = 400) {
+  function randomSpot(random, accept, attempts = 400, area = PLAY_BOUNDS) {
     for (let attempt = 0; attempt < attempts; attempt++) {
-      const x = lerp(PLAY_BOUNDS.minX, PLAY_BOUNDS.maxX, random());
-      const z = lerp(PLAY_BOUNDS.minZ, PLAY_BOUNDS.maxZ, random());
+      const x = lerp(area.minX, area.maxX, random());
+      const z = lerp(area.minZ, area.maxZ, random());
       if (!isWalkable(x, z)) continue;
       const height = collisionField.sample(x, z);
       if (accept(x, z, height)) return { x, z, y: height };
@@ -546,41 +616,44 @@ export function createWorld(quality) {
   return {
     ground, heightAt: collisionField.sample, retained, pools: retained.pools, boulders, logs, reefProps, morayDens, campProps: CAMP_PROPS, holdProps: HOLD_PROPS, isInHold, isInCamp,
     terrain, terrainMesh: terrain.mesh, walkGrid, isCellWalkable: walkability.isCellWalkable, isWalkable, isOnReef, waterLevelAt, randomSpot, createRandom,
+    isTidal, updateSeaLevel, isSandbarOpen: () => sandbarOpen,
     blockCircle: walkability.blockCircle, unblockCells: walkability.unblockCells, prepareAround, computedCollisionChunks: collisionField.computedChunkCount,
   };
 }
 
 const GULL_TERRITORY_EDGE_Z = -92;
+const GULL_TERRITORY_HALF_WIDTH = 110;
 const HIGH_TIDE_MARK = TIDE_MIDDLE + TIDE_AMPLITUDE;
 
 export const HOME_BEACH_ENEMIES = [
-  { kind: 'sandHopper', count: 10, packSize: [3, 4], accept: (world, x, z, height) => height > HIGH_TIDE_MARK + 0.6 && z > -74 && !isInCamp(x, z) && Math.hypot(x - HOLD.x, z - HOLD.z) > HOLD.halfLength + 6 && Math.hypot(x - CAMP.x, z - CAMP.z) > CAMP.radius + 8 && world.retained.levelAt(x, z) < height },
-  { kind: 'shoreCrab', count: 4, accept: (world, x, z, height) => { if (isOnReef(x, z)) return false; const depth = world.retained.levelAt(x, z) - height; return depth > 0.3 && depth < 1.6; } },
-  { kind: 'gull', count: 1, accept: (world, x, z) => z < -97 && z > -103 && Math.abs(x) < 40, territory: (x, z) => z < GULL_TERRITORY_EDGE_Z },
-  { kind: 'rivalHermit', count: 3, accept: (world, x, z, height) => !isOnReef(x, z) && height > HIGH_TIDE_MARK && height < HIGH_TIDE_MARK + 3 && z > -74 && !isInCamp(x, z) && Math.hypot(x - HOLD.x, z - HOLD.z) > HOLD.halfLength + 6 && Math.hypot(x - CAMP.x, z - CAMP.z) > CAMP.radius + 8 && world.retained.levelAt(x, z) < height },
-  { kind: 'rivalHermit', count: 1, accept: (world, x, z, height) => isOnReef(x, z) && height > -2 && awayFromLair(x, z, 6) },
+  { kind: 'sandHopper', count: 28, packSize: [3, 4], accept: (world, x, z, height) => height > HIGH_TIDE_MARK + 0.6 && z > -74 && !isInCamp(x, z) && Math.hypot(x - HOLD.x, z - HOLD.z) > HOLD.halfLength + 6 && Math.hypot(x - CAMP.x, z - CAMP.z) > CAMP.radius + 8 && world.retained.levelAt(x, z) < height },
+  { kind: 'shoreCrab', count: 10, accept: (world, x, z, height) => { if (isOnReef(x, z)) return false; const depth = world.retained.levelAt(x, z) - height; return depth > 0.3 && depth < 1.6; } },
+  { kind: 'gull', count: 1, spotsFrom: () => [GULL_PERCHES[0]], accept: () => true, territory: (x, z) => z < GULL_TERRITORY_EDGE_Z && Math.abs(x - GULL_PERCHES[0].x) < GULL_TERRITORY_HALF_WIDTH },
+  { kind: 'gull', count: 1, spotsFrom: () => [GULL_PERCHES[1]], accept: () => true, territory: (x, z) => z < GULL_TERRITORY_EDGE_Z && Math.abs(x - GULL_PERCHES[1].x) < GULL_TERRITORY_HALF_WIDTH },
+  { kind: 'rivalHermit', count: 5, accept: (world, x, z, height) => !isOnReef(x, z) && height > HIGH_TIDE_MARK && height < HIGH_TIDE_MARK + 3 && z > -74 && !isInCamp(x, z) && Math.hypot(x - HOLD.x, z - HOLD.z) > HOLD.halfLength + 6 && Math.hypot(x - CAMP.x, z - CAMP.z) > CAMP.radius + 8 && world.retained.levelAt(x, z) < height },
+  { kind: 'rivalHermit', count: 2, area: REEF_AREA, accept: (world, x, z, height) => isOnReef(x, z) && height > -2 && awayFromLair(x, z, 6) },
 ];
 
 const awayFromLair = (x, z, margin) => Math.hypot(x - LOBSTER_LAIR.x, z - LOBSTER_LAIR.z) > LOBSTER_LAIR.territoryRadius + margin;
 
 export const REEF_ENEMIES = [
   { kind: 'moray', count: MORAY_DEN_COUNT, spotsFrom: (world) => world.morayDens, accept: () => true },
-  { kind: 'octopus', count: 2, accept: (world, x, z, height) => isOnReef(x, z) && z > 68 && height < -2.5 && awayFromLair(x, z, 4) },
-  { kind: 'mantisShrimp', count: 4, accept: (world, x, z, height) => isOnReef(x, z) && z > 64 && height > -3.2 && awayFromLair(x, z, 4) },
+  { kind: 'octopus', count: 5, area: REEF_AREA, accept: (world, x, z, height) => isOnReef(x, z) && z > 68 && height < -2.5 && awayFromLair(x, z, 4) },
+  { kind: 'mantisShrimp', count: 10, area: REEF_AREA, accept: (world, x, z, height) => isOnReef(x, z) && z > 64 && height > -3.2 && awayFromLair(x, z, 4) },
   { kind: 'giantLobster', count: 1, spotsFrom: () => [LOBSTER_LAIR], accept: (world, x, z) => !awayFromLair(x, z, -LOBSTER_LAIR.territoryRadius + 4), territory: (x, z) => !awayFromLair(x, z, 0) },
 ];
 
 const awayFromCatLair = (x, z, margin) => Math.hypot(x - CAT_LAIR.x, z - CAT_LAIR.z) > CAT_LAIR.territoryRadius + margin;
 
 export const CAMP_ENEMIES = [
-  { kind: 'rat', count: 4, packSize: [2, 2], accept: (world, x, z) => isInCamp(x, z) && awayFromCatLair(x, z, 2) },
+  { kind: 'rat', count: 4, packSize: [2, 2], area: CAMP_AREA, accept: (world, x, z) => isInCamp(x, z) && awayFromCatLair(x, z, 2) },
   { kind: 'shipCat', count: 1, spotsFrom: () => [CAT_LAIR], accept: (world, x, z) => !awayFromCatLair(x, z, -CAT_LAIR.territoryRadius + 5), territory: (x, z) => !awayFromCatLair(x, z, 0) },
 ];
 
 const awayFromCook = (x, z, margin) => Math.hypot(x - COOK_SPOT.x, z - COOK_SPOT.z) > COOK_SPOT.territoryRadius + margin;
 
 export const HOLD_ENEMIES = [
-  { kind: 'cockroach', count: 6, packSize: [3, 3], accept: (world, x, z) => isInHold(x, z) && awayFromCook(x, z, -8) },
-  { kind: 'rat', count: 2, packSize: [2, 2], accept: (world, x, z) => isInHold(x, z) && awayFromCook(x, z, -6) },
+  { kind: 'cockroach', count: 6, packSize: [3, 3], area: HOLD_AREA, accept: (world, x, z) => isInHold(x, z) && awayFromCook(x, z, -8) },
+  { kind: 'rat', count: 2, packSize: [2, 2], area: HOLD_AREA, accept: (world, x, z) => isInHold(x, z) && awayFromCook(x, z, -6) },
   { kind: 'cook', count: 1, spotsFrom: () => [COOK_SPOT], accept: (world, x, z) => Math.hypot(x - COOK_SPOT.x, z - COOK_SPOT.z) < 1, territory: (x, z) => isInHold(x, z), stations: COOK_STATIONS, exit: HOLD_EXIT },
 ];

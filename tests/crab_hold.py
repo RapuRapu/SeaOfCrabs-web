@@ -21,10 +21,10 @@ window.__hold = (() => {
     while (d.remains.list.length) d.remains.remove(d.remains.list[0]);
     const enemies = [];
     if (kind === 'cook') {
-      place(101 - 6, -60 - 1);
-      enemies.push(d.enemies.spawn('cook', 101, -60));
+      place(317 - 6, -54 - 1);
+      enemies.push(d.enemies.spawn('cook', 317, -54));
     } else {
-      const spot = place(66, -63);
+      const spot = place(282, -57);
       for (let index = 0; index < count; index++) {
         const enemySpot = d.navigation.nearestWalkable(spot.x - 3 - index * 1.5, spot.z + 1.5 - index * 3, 10);
         enemies.push(d.enemies.spawn(kind, enemySpot.x, enemySpot.z, index));
@@ -75,12 +75,13 @@ with sync_playwright() as playwright:
 
     area = page.evaluate(r"""() => {
       const d = window.__debug; const w = d.world; const out = {};
+      d.save.worldTime = 300; d.simulate(1 / 60);
       const nodes = d.resources.nodes.filter((n) => n.type === 'fishBone' || n.type === 'wax');
       out.counts = { fishBone: nodes.filter((n) => n.type === 'fishBone').length, wax: nodes.filter((n) => n.type === 'wax').length };
       const home = { x: d.player.x, z: d.player.z };
       out.reachable = nodes.filter((n) => { const spot = d.navigation.nearestWalkable(n.x, n.z, 4); return spot && d.navigation.findPath(home.x, home.z, spot.x, spot.z).length > 0; }).length;
-      out.cookReachable = d.navigation.findPath(home.x, home.z, 95, -60).length > 0;
-      out.insideReachable = d.navigation.findPath(home.x, home.z, 74, -64).length > 0;
+      out.cookReachable = d.navigation.findPath(home.x, home.z, 311, -54).length > 0;
+      out.insideReachable = d.navigation.findPath(home.x, home.z, 290, -58).length > 0;
       out.stationsWalkable = d.enemies.list.find((e) => e.kind === 'cook').entry.stations.every((s) => w.isWalkable(s.x, s.z) && w.isInHold(s.x, s.z));
       out.beachItemsInHold = d.resources.nodes.filter((n) => !['fishBone', 'wax'].includes(n.type) && !n.gathered && w.isInHold(n.x, n.z)).length;
       out.holdEnemies = { cockroaches: d.enemies.list.filter((e) => e.kind === 'cockroach').length, cooks: d.enemies.list.filter((e) => e.kind === 'cook').length, ratsInHold: d.enemies.list.filter((e) => e.kind === 'rat' && w.isInHold(e.x, e.z)).length };
@@ -101,6 +102,7 @@ with sync_playwright() as playwright:
       d.craftItem('shell', 'snail');
       if (d.isUnderground()) d.exitBurrow();
       Object.assign(d.save, { reefFound: true, reefGearCrafted: true, campFound: true });
+      d.save.worldTime = 300;
       Object.assign(d.save.inventory, { scrap: 4, cloth: 2, pearls: 2 });
       d.gear.state.toolTier = 2;
       d.upgradeTools();
@@ -127,7 +129,7 @@ with sync_playwright() as playwright:
       const [cook] = c.setup('cook', 1, 10, 'coral', 9, 'coralTipped', 0, false);
       cook.health = 1e5;
       const start = { x: cook.x, z: cook.z };
-      c.place(40, -30);
+      c.place(256, -24);
       const activities = new Set();
       let farthest = 0;
       c.step(40, () => { if (cook.activity) activities.add(cook.activity); farthest = Math.max(farthest, Math.hypot(cook.x - start.x, cook.z - start.z)); return false; });
@@ -148,7 +150,7 @@ with sync_playwright() as playwright:
       c.place(cook.x - 5, cook.z); d.engage(cook);
       c.step(15, () => cook.zone && cook.zone.stomp);
       out.stompAfterTwoChops = !!(cook.zone && cook.zone.stomp) && cook.strikesMade === 2;
-      c.place(40, -30); d.player.combatTarget = null;
+      c.place(256, -24); d.player.combatTarget = null;
       c.step(20, () => cook.state === 'idle');
       out.cookStaysInHold = cook.state !== 'chase' && d.world.isInHold(cook.x, cook.z);
       const apronBefore = d.save.inventory.apronScrap || 0;

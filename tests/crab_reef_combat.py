@@ -11,7 +11,7 @@ window.__reef = (() => {
   const silenceOthers = (keep) => { for (const enemy of d.enemies.list) if (enemy !== keep) Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 }); };
   const place = (x, z) => { if (d.isUnderground()) d.exitBurrow(); const spot = d.navigation.nearestWalkable(x, z, 20); Object.assign(d.player, { x: spot.x, z: spot.z, path: [], pathIndex: 0, combatTarget: null, gatherTarget: null, speed: 0, inkedUntil: 0 }); return spot; };
   const equip = (shell, shellInvestment, claws, clawInvestment) => d.equipBuild(shell, claws, shellInvestment > 0 || clawInvestment > 0);
-  const arena = { moray: null, octopus: { x: 10, z: 82 }, mantisShrimp: { x: 10, z: 76 }, giantLobster: { x: -62, z: 92 } };
+  const arena = { moray: null, octopus: { x: 10, z: 82 }, mantisShrimp: { x: 10, z: 76 }, giantLobster: { x: -250, z: 156 } };
   function setup(kind, level, shell, shellInvestment, claws, clawInvestment, fed) {
     d.progression.setLevel(level);
     d.progression.state.experience = -1e9;
@@ -26,7 +26,7 @@ window.__reef = (() => {
       enemy = d.enemies.spawn('moray', den.x, den.z);
     } else if (kind === 'giantLobster') {
       place(arena.giantLobster.x, arena.giantLobster.z - 7);
-      enemy = d.enemies.spawn('giantLobster', -62, 96);
+      enemy = d.enemies.spawn('giantLobster', -250, 160);
     } else {
       const spot = place(arena[kind].x, arena[kind].z);
       const enemySpot = d.navigation.nearestWalkable(spot.x + 3, spot.z + 1, 10);
@@ -135,9 +135,9 @@ with sync_playwright() as playwright:
       out.mantisDoubleStrikeGap = strikeTimes.length === 2 ? +(strikeTimes[1] - strikeTimes[0]).toFixed(2) : null;
 
       const lobster = r.setup('giantLobster', 10, 'coral', 6, 'coralTipped', 6, false);
-      r.place(-62, 96 - 25); r.step(2);
+      r.place(-250, 160 - 25); r.step(2);
       out.lobsterIgnoresOutsideTerritory = lobster.state === 'idle';
-      r.place(-62, 96 - 7); r.step(4, () => !!lobster.zone);
+      r.place(-250, 160 - 7); r.step(4, () => !!lobster.zone);
       out.lobsterTelegraphs = !!lobster.zone;
       const zone = lobster.zone;
       const healthBefore = d.progression.state.health;
@@ -145,7 +145,7 @@ with sync_playwright() as playwright:
       r.place(zone.x + away.x / length * (zone.radius + 2.5), zone.z + away.z / length * (zone.radius + 2.5));
       r.step(zone.timer + 0.1);
       out.dodgeAvoidsDamage = d.progression.state.health === healthBefore && lobster.strikesMade === 1;
-      r.place(-62, 96 - 7); r.step(6, () => lobster.strikesMade >= 2);
+      r.place(-250, 160 - 7); r.step(6, () => lobster.strikesMade >= 2);
       const lobsterHealth = lobster.health;
       out.spikesHurtAttacker = lobster.health < lobster.definition.health;
       lobster.health = 1; d.save.inventory.pearls = 0; d.engage(lobster); r.step(5, () => lobster.state === 'dying');

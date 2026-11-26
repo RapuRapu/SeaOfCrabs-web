@@ -38,7 +38,7 @@ FLOW = r'''
   Object.assign(d.player, { x: idle.x + 30, z: idle.z });
   for (let step = 0; step < 600; step++) d.simulate(1 / 60);
   out.nearEnemyWakes = idle.wanderTimer !== before.wanderTimer || idle.x !== before.x;
-  out.resourcesUnchanged = d.resources.nodes.filter((node) => node.type === 'shellBits').length === 16;
+  out.resourcesScaleWithArea = d.resources.nodes.filter((node) => node.type === 'shellBits').length > 16 && d.resources.nodes.filter((node) => node.type === 'scrap').length === 10;
   return out;
 }
 '''

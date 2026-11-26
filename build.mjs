@@ -27,7 +27,7 @@ const result = await build({
   entryPoints: [target.entry],
   bundle: true,
   format: 'esm',
-  minify: true,
+  minify: process.env.NO_MINIFY ? false : true,
   target: 'es2022',
   loader: { '.glb': 'binary' },
   write: false,

@@ -5,6 +5,7 @@ const CANVAS_PIXELS = 768;
 const TERRAIN_CELLS = 320;
 const FOG_CELLS = 192;
 const MIN_EXTENT = 40;
+const FRAME_SCAN_STEP = 5.9;
 const FOG_EDGE_BLUR_PIXELS = 7;
 const CONTOUR_STEP = 1.2;
 const WET_BAND = 0.8;
@@ -37,7 +38,8 @@ function normalize(vector) {
 const mix = (from, to, share) => from.map((value, index) => value + (to[index] - value) * share);
 const clamp01 = (value) => Math.min(1, Math.max(0, value));
 
-export function createMapView(root, { world, fog, halfSize, waterLevel, cameraYaw, onClose }) {
+export function createMapView(root, { world, fog, bounds, waterLevel, cameraYaw, onClose }) {
+  const largestHalfExtent = Math.max(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) / 2;
   const overlay = element('div', 'workbench map-panel', root);
   const card = element('div', 'workbench-card map-card', overlay);
   const canvas = element('canvas', 'map-canvas', card);
@@ -66,7 +68,7 @@ export function createMapView(root, { world, fog, halfSize, waterLevel, cameraYa
   revealedCanvas.width = revealedCanvas.height = CANVAS_PIXELS;
   let terrainFrameKey = null;
 
-  let extent = halfSize;
+  let extent = largestHalfExtent;
   let center = { x: 0, z: 0 };
   const forward = { x: -Math.sin(cameraYaw), z: Math.cos(cameraYaw) };
   const right = { x: -forward.z, z: forward.x };
@@ -81,7 +83,7 @@ export function createMapView(root, { world, fog, halfSize, waterLevel, cameraYa
     return { x: (across / extent + 1) / 2 * CANVAS_PIXELS, y: (1 - up / extent) / 2 * CANVAS_PIXELS };
   };
   const pixelsPerUnit = () => CANVAS_PIXELS / (extent * 2);
-  const insideWorld = (point) => Math.abs(point.x) <= halfSize && Math.abs(point.z) <= halfSize;
+  const insideWorld = (point) => point.x >= bounds.minX && point.x <= bounds.maxX && point.z >= bounds.minZ && point.z <= bounds.maxZ;
   const screenAngleOf = (worldX, worldZ) => Math.atan2(-(worldX * forward.x + worldZ * forward.z), worldX * right.x + worldZ * right.z);
 
   function sampleTerrain() {
@@ -419,12 +421,12 @@ export function createMapView(root, { world, fog, halfSize, waterLevel, cameraYa
       low = { x: Math.min(low.x, x), z: Math.min(low.z, z) };
       high = { x: Math.max(high.x, x), z: Math.max(high.z, z) };
     };
-    const step = halfSize / 40;
-    for (let x = -halfSize; x <= halfSize; x += step) for (let z = -halfSize; z <= halfSize; z += step) if (fog.isRevealed(x, z)) include(x, z);
+    const step = FRAME_SCAN_STEP;
+    for (let x = bounds.minX; x <= bounds.maxX; x += step) for (let z = bounds.minZ; z <= bounds.maxZ; z += step) if (fog.isRevealed(x, z)) include(x, z);
     for (const point of points) include(point.x, point.z);
-    if (!Number.isFinite(low.x)) return { center: { x: 0, z: 0 }, extent: halfSize };
+    if (!Number.isFinite(low.x)) return { center: { x: 0, z: 0 }, extent: largestHalfExtent };
     const size = Math.max(high.x - low.x, high.z - low.z) / 2;
-    return { center: { x: (low.x + high.x) / 2, z: (low.z + high.z) / 2 }, extent: Math.min(halfSize * 1.05, Math.max(MIN_EXTENT, size * 1.25 + 8)) };
+    return { center: { x: (low.x + high.x) / 2, z: (low.z + high.z) / 2 }, extent: Math.min(largestHalfExtent * 1.05, Math.max(MIN_EXTENT, size * 1.25 + 8)) };
   }
 
   function draw({ player = null, playerHeading = 0, entrances = [], remains = [], looters = [], rack = null, bosses = [] }) {

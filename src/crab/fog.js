@@ -44,6 +44,43 @@ vec3 applyFog(vec3 color, vec2 worldXZ, float time) {
 }
 `;
 
+const texelGridOf = (bounds) => {
+  const columns = Math.round((bounds.maxX - bounds.minX) / FOG_UNITS_PER_TEXEL);
+  const rows = Math.round((bounds.maxZ - bounds.minZ) / FOG_UNITS_PER_TEXEL);
+  return { columns, rows, unitsPerTexel: (bounds.maxX - bounds.minX) / columns };
+};
+
+const decodeBits = (encoded, length) => {
+  const bytes = Uint8Array.from(atob(encoded), (character) => character.charCodeAt(0));
+  return Array.from({ length }, (_, index) => (bytes[index >> 3] & (1 << (index & 7))) !== 0);
+};
+
+const encodeBits = (bits) => {
+  const bytes = new Uint8Array(Math.ceil(bits.length / 8));
+  bits.forEach((bit, index) => {
+    if (bit) bytes[index >> 3] |= 1 << (index & 7);
+  });
+  let text = '';
+  for (const byte of bytes) text += String.fromCharCode(byte);
+  return btoa(text);
+};
+
+export function remapFog(encoded, fromBounds, toBounds) {
+  const from = texelGridOf(fromBounds);
+  const to = texelGridOf(toBounds);
+  const fromBits = decodeBits(encoded, from.columns * from.rows);
+  const toBits = new Array(to.columns * to.rows).fill(false);
+  for (let row = 0; row < to.rows; row++) {
+    for (let column = 0; column < to.columns; column++) {
+      const fromColumn = Math.floor(((column + 0.5) * to.unitsPerTexel + toBounds.minX - fromBounds.minX) / from.unitsPerTexel);
+      const fromRow = Math.floor(((row + 0.5) * to.unitsPerTexel + toBounds.minZ - fromBounds.minZ) / from.unitsPerTexel);
+      if (fromColumn < 0 || fromRow < 0 || fromColumn >= from.columns || fromRow >= from.rows) continue;
+      toBits[row * to.columns + column] = fromBits[fromRow * from.columns + fromColumn];
+    }
+  }
+  return encodeBits(toBits);
+}
+
 export function createFog({ bounds, saved }) {
   const columns = Math.round((bounds.maxX - bounds.minX) / FOG_UNITS_PER_TEXEL);
   const rows = Math.round((bounds.maxZ - bounds.minZ) / FOG_UNITS_PER_TEXEL);

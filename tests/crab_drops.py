@@ -14,9 +14,9 @@ window.__drops = (() => {
   const place = (x, z) => { if (d.isUnderground()) d.exitBurrow(); const spot = d.navigation.nearestWalkable(x, z, 20); Object.assign(d.player, { x: spot.x, z: spot.z, path: [], pathIndex: 0, combatTarget: null, gatherTarget: null, speed: 0, inkedUntil: 0 }); return spot; };
   const equip = (shell, shellInvestment, claws, clawInvestment) => d.equipBuild(shell, claws, shellInvestment > 0 || clawInvestment > 0);
   const arenas = {
-    giantLobster: { lair: { x: -62, z: 96 }, stand: { x: -62, z: 89 } },
-    shipCat: { lair: { x: -97, z: -63 }, stand: { x: -97, z: -54 } },
-    cook: { lair: { x: 106, z: -64 }, stand: { x: 100, z: -65 } },
+    giantLobster: { lair: { x: -250, z: 160 }, stand: { x: -250, z: 153 } },
+    shipCat: { lair: { x: -269, z: -171 }, stand: { x: -269, z: -162 } },
+    cook: { lair: { x: 322, z: -58 }, stand: { x: 316, z: -59 } },
   };
   function fight(kind, level, shell, shellInvestment, claws, clawInvestment, fed) {
     d.progression.setLevel(level);
@@ -100,10 +100,10 @@ with sync_playwright() as playwright:
     resting = page.evaluate(r"""() => {
       const d = window.__debug; const c = window.__drops; const out = {};
       d.save.bossDefeatedAt = {};
-      const cat = d.enemies.spawn('shipCat', -97, -63);
+      const cat = d.enemies.spawn('shipCat', -269, -171);
       c.silenceOthers([cat]);
       cat.health = 1; d.engage(cat);
-      c.place(-97, -57);
+      c.place(-269, -165);
       d.progression.setLevel(10); d.progression.state.health = d.progression.maxHealth();
       c.equip('coral', 9, 'coralTipped', 9);
       c.step(20, () => cat.state === 'dead');

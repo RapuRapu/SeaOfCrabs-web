@@ -79,9 +79,9 @@ with sync_playwright() as playwright:
       out.counts = { scrap: nodes.filter((n) => n.type === 'scrap').length, cloth: nodes.filter((n) => n.type === 'cloth').length };
       const home = { x: d.player.x, z: d.player.z };
       out.reachable = nodes.filter((n) => { const spot = d.navigation.nearestWalkable(n.x, n.z, 4); return spot && d.navigation.findPath(home.x, home.z, spot.x, spot.z).length > 0; }).length;
-      out.lairReachable = d.navigation.findPath(home.x, home.z, -97, -55).length > 0;
-      out.beachItemsInCamp = d.resources.nodes.filter((n) => ['shellBits', 'driftwood'].includes(n.type) && !n.gathered && Math.hypot(n.x + 88, n.z + 62) < 34).length;
-      out.hoppersInCamp = d.enemies.list.filter((e) => e.kind === 'sandHopper' && Math.hypot(e.x + 88, e.z + 62) < 36).length;
+      out.lairReachable = d.navigation.findPath(home.x, home.z, -269, -163).length > 0;
+      out.beachItemsInCamp = d.resources.nodes.filter((n) => ['shellBits', 'driftwood'].includes(n.type) && !n.gathered && Math.hypot(n.x + 260, n.z + 170) < 34).length;
+      out.hoppersInCamp = d.enemies.list.filter((e) => e.kind === 'sandHopper' && Math.hypot(e.x + 260, e.z + 170) < 36).length;
       out.campEnemies = { rats: d.enemies.list.filter((e) => e.kind === 'rat').length, cats: d.enemies.list.filter((e) => e.kind === 'shipCat').length };
       out.propsBlock = w.campProps.every((p) => !w.isWalkable(p.x, p.z));
       return out;
