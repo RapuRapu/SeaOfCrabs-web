@@ -1,17 +1,15 @@
 import * as THREE from 'three';
 import { createNoise2D, createRandom, fractalNoise, smoothstep, lerp } from '../noise.js';
-import { WORLD_SIZE, applySeaside } from './seaside.js';
+import { WORLD_BOUNDS, PLAY_BOUNDS, boundsWidth, boundsDepth } from './worldBounds.js';
+import { createTerrain } from './terrain.js';
 
-export const PLAY_HALF_SIZE = 118;
+export { WORLD_BOUNDS, PLAY_BOUNDS };
 export const DEEP_WATER_HEIGHT = -6.2;
 export const TIDE_MIDDLE = -0.9;
 export const TIDE_AMPLITUDE = 1.7;
 export const TIDE_PERIOD_SECONDS = 480;
 
-const VISUAL_HALF_SIZE = 190;
 const BEACH_SLOPE = 0.055;
-const COLLISION_CELLS = 384;
-const RETAINED_CELLS = 256;
 const NO_RETAINED_WATER = -100;
 const MAX_WALKABLE_SLOPE = 1.25;
 const RETAINED_BELOW_CREST = 0.5;
@@ -65,7 +63,7 @@ const poolNoise = createNoise2D(23);
 const reefNoise = createNoise2D(131);
 
 const reefInnerEdgeAt = (x) => REEF_INNER_EDGE_Z + 6 * reefNoise(x * 0.035, 1.7);
-const reefOuterEdgeAt = (x) => REEF_OUTER_EDGE_Z + 4 * reefNoise(x * 0.05, 9.3) + 1.6 * reefNoise(x * 0.17, 4.1);
+export const reefOuterEdgeAt = (x) => REEF_OUTER_EDGE_Z + 4 * reefNoise(x * 0.05, 9.3) + 1.6 * reefNoise(x * 0.17, 4.1);
 
 export function reefShareAt(x, z) {
   return smoothstep(reefInnerEdgeAt(x) - 8, reefInnerEdgeAt(x) + 4, z) * (1 - smoothstep(reefOuterEdgeAt(x), reefOuterEdgeAt(x) + 1.5, z));
@@ -116,88 +114,169 @@ export function heightAt(x, z) {
   return height;
 }
 
+const COLLISION_CELL_SIZE = 256 / 384;
+const COLLISION_CHUNK_CELLS = 48;
+const RETAINED_CELL_SIZE = 1;
+const WALK_CHUNK_CELLS = 32;
+
 function buildCollisionField() {
-  const cellSize = WORLD_SIZE / COLLISION_CELLS;
-  const samplesPerSide = COLLISION_CELLS + 1;
-  const heights = new Float32Array(samplesPerSide * samplesPerSide);
-  for (let row = 0; row < samplesPerSide; row++) {
-    for (let column = 0; column < samplesPerSide; column++) {
-      heights[row * samplesPerSide + column] = heightAt(column * cellSize - WORLD_SIZE / 2, row * cellSize - WORLD_SIZE / 2);
+  const cellSize = COLLISION_CELL_SIZE;
+  const columns = Math.round(boundsWidth(WORLD_BOUNDS) / cellSize);
+  const rows = Math.round(boundsDepth(WORLD_BOUNDS) / cellSize);
+  const chunkColumns = Math.ceil(columns / COLLISION_CHUNK_CELLS);
+  const chunkRows = Math.ceil(rows / COLLISION_CHUNK_CELLS);
+  const samplesPerChunkSide = COLLISION_CHUNK_CELLS + 1;
+  const chunks = new Array(chunkColumns * chunkRows).fill(null);
+
+  function computeChunk(chunkColumn, chunkRow) {
+    const heights = new Float32Array(samplesPerChunkSide * samplesPerChunkSide);
+    for (let localRow = 0; localRow < samplesPerChunkSide; localRow++) {
+      const z = (chunkRow * COLLISION_CHUNK_CELLS + localRow) * cellSize + WORLD_BOUNDS.minZ;
+      for (let localColumn = 0; localColumn < samplesPerChunkSide; localColumn++) {
+        heights[localRow * samplesPerChunkSide + localColumn] = heightAt((chunkColumn * COLLISION_CHUNK_CELLS + localColumn) * cellSize + WORLD_BOUNDS.minX, z);
+      }
     }
+    return heights;
   }
+
+  function chunkHeights(chunkColumn, chunkRow) {
+    const index = chunkRow * chunkColumns + chunkColumn;
+    return chunks[index] || (chunks[index] = computeChunk(chunkColumn, chunkRow));
+  }
+
   function sample(x, z) {
-    const gridX = Math.min(COLLISION_CELLS - 0.001, Math.max(0, (x + WORLD_SIZE / 2) / cellSize));
-    const gridZ = Math.min(COLLISION_CELLS - 0.001, Math.max(0, (z + WORLD_SIZE / 2) / cellSize));
+    const gridX = Math.min(columns - 0.001, Math.max(0, (x - WORLD_BOUNDS.minX) / cellSize));
+    const gridZ = Math.min(rows - 0.001, Math.max(0, (z - WORLD_BOUNDS.minZ) / cellSize));
     const column = Math.floor(gridX);
     const row = Math.floor(gridZ);
     const blendX = gridX - column;
     const blendZ = gridZ - row;
-    const index = row * samplesPerSide + column;
+    const chunkColumn = Math.floor(column / COLLISION_CHUNK_CELLS);
+    const chunkRow = Math.floor(row / COLLISION_CHUNK_CELLS);
+    const heights = chunkHeights(chunkColumn, chunkRow);
+    const index = (row - chunkRow * COLLISION_CHUNK_CELLS) * samplesPerChunkSide + (column - chunkColumn * COLLISION_CHUNK_CELLS);
     const near = heights[index] * (1 - blendX) + heights[index + 1] * blendX;
-    const far = heights[index + samplesPerSide] * (1 - blendX) + heights[index + samplesPerSide + 1] * blendX;
+    const far = heights[index + samplesPerChunkSide] * (1 - blendX) + heights[index + samplesPerChunkSide + 1] * blendX;
     return near * (1 - blendZ) + far * blendZ;
   }
-  return { sample };
+
+  function prepareAround(x, z, radius, maximumChunks) {
+    let computed = 0;
+    const span = COLLISION_CHUNK_CELLS * cellSize;
+    const firstColumn = Math.max(0, Math.floor((x - radius - WORLD_BOUNDS.minX) / span));
+    const lastColumn = Math.min(chunkColumns - 1, Math.floor((x + radius - WORLD_BOUNDS.minX) / span));
+    const firstRow = Math.max(0, Math.floor((z - radius - WORLD_BOUNDS.minZ) / span));
+    const lastRow = Math.min(chunkRows - 1, Math.floor((z + radius - WORLD_BOUNDS.minZ) / span));
+    for (let chunkRow = firstRow; chunkRow <= lastRow; chunkRow++) {
+      for (let chunkColumn = firstColumn; chunkColumn <= lastColumn; chunkColumn++) {
+        if (chunks[chunkRow * chunkColumns + chunkColumn]) continue;
+        if (computed >= maximumChunks) return computed;
+        chunkHeights(chunkColumn, chunkRow);
+        computed++;
+      }
+    }
+    return computed;
+  }
+
+  const computedChunkCount = () => chunks.filter(Boolean).length;
+  return { sample, prepareAround, computedChunkCount };
+}
+
+function createCellGrid(bounds, cellSize) {
+  const columns = Math.round(boundsWidth(bounds) / cellSize);
+  const rows = Math.round(boundsDepth(bounds) / cellSize);
+  return {
+    columns,
+    rows,
+    cellSize,
+    cellCount: columns * rows,
+    columnOf: (x) => Math.floor((x - bounds.minX) / cellSize),
+    rowOf: (z) => Math.floor((z - bounds.minZ) / cellSize),
+    centerX: (column) => (column + 0.5) * cellSize + bounds.minX,
+    centerZ: (row) => (row + 0.5) * cellSize + bounds.minZ,
+    contains: (column, row) => column >= 0 && row >= 0 && column < columns && row < rows,
+  };
 }
 
 function buildRetainedWater() {
-  const cellSize = WORLD_SIZE / RETAINED_CELLS;
-  const cellCount = RETAINED_CELLS * RETAINED_CELLS;
+  const grid = createCellGrid(WORLD_BOUNDS, RETAINED_CELL_SIZE);
+  const { columns, rows, cellCount } = grid;
   const levels = new Float32Array(cellCount).fill(NO_RETAINED_WATER);
   const submerged = new Float32Array(cellCount);
-  const cellCenter = (index) => (index + 0.5) * cellSize - WORLD_SIZE / 2;
   const insideMargin = (cell) => {
-    const column = cell % RETAINED_CELLS;
-    const row = (cell - column) / RETAINED_CELLS;
-    return column > 1 && row > 1 && column < RETAINED_CELLS - 2 && row < RETAINED_CELLS - 2;
+    const column = cell % columns;
+    const row = (cell - column) / columns;
+    return column > 1 && row > 1 && column < columns - 2 && row < rows - 2;
   };
   const cellHeight = (cell) => {
-    const column = cell % RETAINED_CELLS;
-    return heightAt(cellCenter(column), cellCenter((cell - column) / RETAINED_CELLS));
+    const column = cell % columns;
+    return heightAt(grid.centerX(column), grid.centerZ((cell - column) / columns));
   };
   const pools = [];
+  const touchedAreas = [];
   for (const pool of POOLS) {
     const retainedLevel = pool.crest - RETAINED_BELOW_CREST;
-    const startColumn = Math.floor((pool.x + WORLD_SIZE / 2) / cellSize);
-    const startRow = Math.floor((pool.z + WORLD_SIZE / 2) / cellSize);
-    const pending = [startRow * RETAINED_CELLS + startColumn];
+    const pending = [grid.rowOf(pool.z) * columns + grid.columnOf(pool.x)];
+    const area = { firstColumn: Infinity, lastColumn: -Infinity, firstRow: Infinity, lastRow: -Infinity };
+    const touch = (cell) => {
+      const column = cell % columns;
+      const row = (cell - column) / columns;
+      area.firstColumn = Math.min(area.firstColumn, column);
+      area.lastColumn = Math.max(area.lastColumn, column);
+      area.firstRow = Math.min(area.firstRow, row);
+      area.lastRow = Math.max(area.lastRow, row);
+    };
     let shoreline = [];
     while (pending.length) {
       const cell = pending.pop();
       if (levels[cell] > NO_RETAINED_WATER || !insideMargin(cell)) continue;
-      const column = cell % RETAINED_CELLS;
-      const outsideReefRim = pool.onReef && poolShape(pool, cellCenter(column), cellCenter((cell - column) / RETAINED_CELLS)) > 1;
+      const column = cell % columns;
+      const outsideReefRim = pool.onReef && poolShape(pool, grid.centerX(column), grid.centerZ((cell - column) / columns)) > 1;
       if (outsideReefRim || cellHeight(cell) > retainedLevel + 0.05) {
         shoreline.push(cell);
         continue;
       }
       levels[cell] = retainedLevel;
       submerged[cell] = 1;
-      pending.push(cell + 1, cell - 1, cell + RETAINED_CELLS, cell - RETAINED_CELLS);
+      touch(cell);
+      pending.push(cell + 1, cell - 1, cell + columns, cell - columns);
     }
     for (let ring = 0; ring < SHORE_DILATION_CELLS; ring++) {
       const nextShoreline = [];
       for (const cell of shoreline) {
         if (levels[cell] > NO_RETAINED_WATER || !insideMargin(cell) || cellHeight(cell) < retainedLevel) continue;
         levels[cell] = retainedLevel;
-        nextShoreline.push(cell + 1, cell - 1, cell + RETAINED_CELLS, cell - RETAINED_CELLS);
+        touch(cell);
+        nextShoreline.push(cell + 1, cell - 1, cell + columns, cell - columns);
       }
       shoreline = nextShoreline;
     }
+    if (Number.isFinite(area.firstColumn)) touchedAreas.push(area);
     pools.push({ ...pool, retainedLevel });
   }
 
+  const BLUR_PASSES = 3;
+  const BLUR_RADIUS = 2;
+  const blurReach = BLUR_PASSES * BLUR_RADIUS;
+  const blurAreas = touchedAreas.map((area) => ({
+    firstColumn: Math.max(3, area.firstColumn - blurReach),
+    lastColumn: Math.min(columns - 4, area.lastColumn + blurReach),
+    firstRow: Math.max(3, area.firstRow - blurReach),
+    lastRow: Math.min(rows - 4, area.lastRow + blurReach),
+  }));
   const blurredField = (field) => {
     let current = field;
-    for (let pass = 0; pass < 3; pass++) {
+    for (let pass = 0; pass < BLUR_PASSES; pass++) {
       const blurred = new Float32Array(cellCount);
-      for (let row = 3; row < RETAINED_CELLS - 3; row++) {
-        for (let column = 3; column < RETAINED_CELLS - 3; column++) {
-          let sum = 0;
-          for (let offsetRow = -2; offsetRow <= 2; offsetRow++) {
-            for (let offsetColumn = -2; offsetColumn <= 2; offsetColumn++) sum += current[(row + offsetRow) * RETAINED_CELLS + column + offsetColumn];
+      for (const area of blurAreas) {
+        for (let row = area.firstRow; row <= area.lastRow; row++) {
+          for (let column = area.firstColumn; column <= area.lastColumn; column++) {
+            let sum = 0;
+            for (let offsetRow = -BLUR_RADIUS; offsetRow <= BLUR_RADIUS; offsetRow++) {
+              for (let offsetColumn = -BLUR_RADIUS; offsetColumn <= BLUR_RADIUS; offsetColumn++) sum += current[(row + offsetRow) * columns + column + offsetColumn];
+            }
+            blurred[row * columns + column] = sum / 25;
           }
-          blurred[row * RETAINED_CELLS + column] = sum / 25;
         }
       }
       current = blurred;
@@ -208,137 +287,27 @@ function buildRetainedWater() {
   const weightedLevel = blurredField(submerged.map((isSubmerged, cell) => (isSubmerged ? levels[cell] : 0)));
 
   const packed = new Uint16Array(cellCount * 4);
+  const noWaterHalf = THREE.DataUtils.toHalfFloat(NO_RETAINED_WATER);
+  const zeroHalf = THREE.DataUtils.toHalfFloat(0);
   for (let cell = 0; cell < cellCount; cell++) {
-    packed[cell * 4] = THREE.DataUtils.toHalfFloat(levels[cell]);
-    packed[cell * 4 + 1] = THREE.DataUtils.toHalfFloat(influence[cell]);
-    packed[cell * 4 + 2] = THREE.DataUtils.toHalfFloat(influence[cell] > 0.001 ? weightedLevel[cell] / influence[cell] : NO_RETAINED_WATER);
+    const hasWater = levels[cell] > NO_RETAINED_WATER;
+    const hasInfluence = influence[cell] > 0;
+    packed[cell * 4] = hasWater ? THREE.DataUtils.toHalfFloat(levels[cell]) : noWaterHalf;
+    packed[cell * 4 + 1] = hasInfluence ? THREE.DataUtils.toHalfFloat(influence[cell]) : zeroHalf;
+    packed[cell * 4 + 2] = influence[cell] > 0.001 ? THREE.DataUtils.toHalfFloat(weightedLevel[cell] / influence[cell]) : noWaterHalf;
   }
-  const texture = new THREE.DataTexture(packed, RETAINED_CELLS, RETAINED_CELLS, THREE.RGBAFormat, THREE.HalfFloatType);
+  const texture = new THREE.DataTexture(packed, columns, rows, THREE.RGBAFormat, THREE.HalfFloatType);
   texture.magFilter = THREE.LinearFilter;
   texture.minFilter = THREE.LinearFilter;
   texture.needsUpdate = true;
 
   function levelAt(x, z) {
-    const column = Math.floor((x + WORLD_SIZE / 2) / cellSize);
-    const row = Math.floor((z + WORLD_SIZE / 2) / cellSize);
-    if (column < 0 || row < 0 || column >= RETAINED_CELLS || row >= RETAINED_CELLS) return NO_RETAINED_WATER;
-    return levels[row * RETAINED_CELLS + column];
+    const column = grid.columnOf(x);
+    const row = grid.rowOf(z);
+    if (!grid.contains(column, row)) return NO_RETAINED_WATER;
+    return levels[row * columns + column];
   }
   return { texture, levelAt, pools };
-}
-
-const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
-const DRY_SAND = linearColor(0.9, 0.78, 0.58);
-const BLEACHED_SAND = linearColor(0.96, 0.9, 0.76);
-const TIDAL_SAND = linearColor(0.8, 0.68, 0.5);
-const POOL_SAND = linearColor(0.82, 0.76, 0.56);
-const POOL_ALGAE = linearColor(0.36, 0.44, 0.2);
-const POOL_CORALLINE = linearColor(0.8, 0.5, 0.52);
-const DEEP_SILT = linearColor(0.5, 0.52, 0.42);
-const REEF_LIMESTONE = linearColor(0.6, 0.57, 0.5);
-const REEF_CORALLINE = linearColor(0.8, 0.46, 0.5);
-const REEF_TURF = linearColor(0.36, 0.4, 0.22);
-const REEF_SAND = linearColor(0.88, 0.82, 0.66);
-const REEF_LIP = linearColor(0.86, 0.8, 0.7);
-const reefColor = new THREE.Color();
-
-function buildTerrainMesh(ground, boulders, logs, quality) {
-  const cellsPerSide = Math.round((VISUAL_HALF_SIZE * 2) / quality.terrainCellSize);
-  const cellSize = (VISUAL_HALF_SIZE * 2) / cellsPerSide;
-  const samplesPerSide = cellsPerSide + 1;
-  const positions = new Float32Array(samplesPerSide * samplesPerSide * 3);
-  const colors = new Float32Array(samplesPerSide * samplesPerSide * 3);
-  const heights = new Float32Array(samplesPerSide * samplesPerSide);
-  const tintNoise = createNoise2D(91);
-  const color = new THREE.Color();
-  for (let row = 0; row < samplesPerSide; row++) {
-    for (let column = 0; column < samplesPerSide; column++) {
-      const x = column * cellSize - VISUAL_HALF_SIZE;
-      const z = row * cellSize - VISUAL_HALF_SIZE;
-      const height = heightAt(x, z);
-      const index = row * samplesPerSide + column;
-      heights[index] = height;
-      positions[index * 3] = x;
-      positions[index * 3 + 1] = height;
-      positions[index * 3 + 2] = z;
-
-      const patch = fractalNoise(tintNoise, x * 0.05, z * 0.05, 3);
-      color.copy(DRY_SAND).lerp(BLEACHED_SAND, smoothstep(2.5, 7, height) * 0.8 + patch * 0.15);
-      color.lerp(TIDAL_SAND, smoothstep(1.2, -1.2, height) * 0.75);
-      const reefShare = reefShareAt(x, z) * (1 - smoothstep(-4, -7, height));
-      if (reefShare > 0) {
-        const reefPatch = fractalNoise(tintNoise, x * 0.21 + 70, z * 0.21, 3);
-        reefColor.copy(REEF_LIMESTONE).lerp(REEF_CORALLINE, smoothstep(0.12, 0.42, reefPatch) * 0.5);
-        reefColor.lerp(REEF_TURF, smoothstep(-0.05, 0.35, -reefPatch) * 0.75);
-        reefColor.lerp(REEF_SAND, smoothstep(-3.1, -3.5, height) * 0.7);
-        color.lerp(reefColor, reefShare * 0.9);
-      }
-      const outerEdge = reefOuterEdgeAt(x);
-      const lipShare = smoothstep(outerEdge - 3, outerEdge - 0.5, z) * (1 - smoothstep(outerEdge - 0.5, outerEdge + 0.5, z));
-      color.lerp(REEF_LIP, lipShare * 0.7 * smoothstep(40, 60, z));
-      color.multiplyScalar(1 - 0.55 * smoothstep(outerEdge, outerEdge + 2.5, z) * smoothstep(40, 60, z));
-      const submergedInPool = ground.retained.levelAt(x, z) - height;
-      if (submergedInPool > 0) {
-        const poolDepth = smoothstep(0, 2.2, submergedInPool);
-        color.lerp(POOL_SAND, poolDepth * 0.8);
-        color.lerp(POOL_ALGAE, smoothstep(0.25, 0.6, patch) * poolDepth * 0.55);
-        color.lerp(POOL_CORALLINE, smoothstep(0.2, 0.5, -patch) * poolDepth * 0.55);
-      }
-      color.lerp(DEEP_SILT, smoothstep(-3.5, -8, height) * (submergedInPool > 0 ? 0 : 0.8));
-
-      let contactShade = 1;
-      for (const boulder of boulders) {
-        const distance = Math.hypot(x - boulder.x, z - boulder.z);
-        contactShade *= 1 - 0.5 * smoothstep(boulder.radius * 1.3, boulder.radius * 0.7, distance);
-      }
-      for (const log of logs) {
-        const along = THREE.MathUtils.clamp((x - log.x) * Math.cos(log.heading) + (z - log.z) * Math.sin(log.heading), -log.length / 2, log.length / 2);
-        const distance = Math.hypot(x - log.x - Math.cos(log.heading) * along, z - log.z - Math.sin(log.heading) * along);
-        contactShade *= 1 - 0.45 * smoothstep(log.radius * 1.8, log.radius * 0.6, distance);
-      }
-      colors[index * 3] = color.r * contactShade;
-      colors[index * 3 + 1] = color.g * contactShade;
-      colors[index * 3 + 2] = color.b * contactShade;
-    }
-  }
-  const normals = new Float32Array(samplesPerSide * samplesPerSide * 3);
-  const normal = new THREE.Vector3();
-  for (let row = 0; row < samplesPerSide; row++) {
-    for (let column = 0; column < samplesPerSide; column++) {
-      const index = row * samplesPerSide + column;
-      const west = heights[row * samplesPerSide + Math.max(0, column - 1)];
-      const east = heights[row * samplesPerSide + Math.min(cellsPerSide, column + 1)];
-      const north = heights[Math.max(0, row - 1) * samplesPerSide + column];
-      const south = heights[Math.min(cellsPerSide, row + 1) * samplesPerSide + column];
-      normal.set(west - east, 2 * cellSize, north - south).normalize();
-      normals[index * 3] = normal.x;
-      normals[index * 3 + 1] = normal.y;
-      normals[index * 3 + 2] = normal.z;
-    }
-  }
-  const indices = new Uint32Array(cellsPerSide * cellsPerSide * 6);
-  let write = 0;
-  for (let row = 0; row < cellsPerSide; row++) {
-    for (let column = 0; column < cellsPerSide; column++) {
-      const corner = row * samplesPerSide + column;
-      indices[write++] = corner;
-      indices[write++] = corner + samplesPerSide;
-      indices[write++] = corner + 1;
-      indices[write++] = corner + 1;
-      indices[write++] = corner + samplesPerSide;
-      indices[write++] = corner + samplesPerSide + 1;
-    }
-  }
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  geometry.setAttribute('normal', new THREE.BufferAttribute(normals, 3));
-  geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
-  geometry.setIndex(new THREE.BufferAttribute(indices, 1));
-  const material = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.93, metalness: 0 }), { surface: 'sand', wetDarkening: 0.6, wetRoughness: 0.42, wetGloss: 0.42, chromaticCaustics: quality.chromaticCaustics });
-  const mesh = new THREE.Mesh(geometry, material);
-  mesh.receiveShadow = true;
-  mesh.castShadow = quality.terrainShadows;
-  return mesh;
 }
 
 const REEF_PROP_KINDS = [
@@ -360,7 +329,7 @@ function placeReefProps(sampleHeight, boulders) {
   for (const definition of REEF_PROP_KINDS) {
     props[definition.kind] = [];
     for (let attempt = 0; attempt < definition.count * 60 && props[definition.kind].length < definition.count; attempt++) {
-      const x = (random() * 2 - 1) * (PLAY_HALF_SIZE - 6);
+      const x = lerp(PLAY_BOUNDS.minX + 6, PLAY_BOUNDS.maxX - 6, random());
       const z = REEF_INNER_EDGE_Z - 4 + random() * (REEF_OUTER_EDGE_Z - REEF_INNER_EDGE_Z + 4);
       const radius = lerp(definition.radius[0], definition.radius[1], random());
       if (!isOnReef(x, z) || z > reefOuterEdgeAt(x) - 2) continue;
@@ -495,70 +464,101 @@ export function isInCamp(x, z) {
   return Math.hypot(x - CAMP.x, z - CAMP.z) < CAMP.radius && z > -91;
 }
 
-function buildWalkability(ground, boulders, logs, reefProps) {
-  const cellsPerSide = WORLD_SIZE;
-  const walkable = new Uint8Array(cellsPerSide * cellsPerSide);
-  for (let row = 0; row < cellsPerSide; row++) {
-    for (let column = 0; column < cellsPerSide; column++) {
-      const x = column + 0.5 - WORLD_SIZE / 2;
-      const z = row + 0.5 - WORLD_SIZE / 2;
-      if (Math.abs(x) > PLAY_HALF_SIZE || Math.abs(z) > PLAY_HALF_SIZE) continue;
-      const height = ground.heightAt(x, z);
-      if (height < DEEP_WATER_HEIGHT) continue;
-      const slope = Math.hypot(ground.heightAt(x + 0.6, z) - ground.heightAt(x - 0.6, z), ground.heightAt(x, z + 0.6) - ground.heightAt(x, z - 0.6)) / 1.2;
-      if (slope > MAX_WALKABLE_SLOPE) continue;
-      walkable[row * cellsPerSide + column] = 1;
-    }
-  }
-  const blockDisc = (centerX, centerZ, radius) => {
-    for (let row = Math.floor(centerZ - radius + WORLD_SIZE / 2); row <= Math.ceil(centerZ + radius + WORLD_SIZE / 2); row++) {
-      for (let column = Math.floor(centerX - radius + WORLD_SIZE / 2); column <= Math.ceil(centerX + radius + WORLD_SIZE / 2); column++) {
-        if (row < 0 || column < 0 || row >= cellsPerSide || column >= cellsPerSide) continue;
-        if (Math.hypot(column + 0.5 - WORLD_SIZE / 2 - centerX, row + 0.5 - WORLD_SIZE / 2 - centerZ) < radius) walkable[row * cellsPerSide + column] = 0;
-      }
-    }
-  };
-  for (const boulder of boulders) blockDisc(boulder.x, boulder.z, boulder.radius * 0.92 + 0.6);
+function collectStaticBlockers(boulders, logs, reefProps) {
+  const discs = [];
+  for (const boulder of boulders) discs.push({ x: boulder.x, z: boulder.z, radius: boulder.radius * 0.92 + 0.6 });
   for (const log of logs) {
-    for (let along = -log.length / 2; along <= log.length / 2; along += 1) blockDisc(log.x + Math.cos(log.heading) * along, log.z + Math.sin(log.heading) * along, log.radius + 0.5);
+    for (let along = -log.length / 2; along <= log.length / 2; along += 1) discs.push({ x: log.x + Math.cos(log.heading) * along, z: log.z + Math.sin(log.heading) * along, radius: log.radius + 0.5 });
   }
-  for (const prop of Object.values(reefProps).flat()) blockDisc(prop.x, prop.z, prop.blockRadius);
-  for (const prop of CAMP_PROPS) for (const disc of CAMP_BLOCKERS[prop.kind](prop)) blockDisc(disc.x, disc.z, disc.radius);
-  for (const prop of HOLD_PROPS) for (const disc of HOLD_BLOCKERS[prop.kind](prop)) blockDisc(disc.x, disc.z, disc.radius);
-  for (const disc of holdWallDiscs()) blockDisc(disc.x, disc.z, disc.radius);
-  blockDisc(COOK_SPOT.x + 2, COOK_SPOT.z - 1, 3.2);
-  return walkable;
+  for (const prop of Object.values(reefProps).flat()) discs.push({ x: prop.x, z: prop.z, radius: prop.blockRadius });
+  for (const prop of CAMP_PROPS) discs.push(...CAMP_BLOCKERS[prop.kind](prop));
+  for (const prop of HOLD_PROPS) discs.push(...HOLD_BLOCKERS[prop.kind](prop));
+  discs.push(...holdWallDiscs());
+  discs.push({ x: COOK_SPOT.x + 2, z: COOK_SPOT.z - 1, radius: 3.2 });
+  return discs;
 }
 
-export function createWorld(quality) {
-  const collisionField = buildCollisionField();
-  const retained = buildRetainedWater();
-  const ground = { heightAt: collisionField.sample, retained };
-  const boulders = BOULDERS.map((boulder) => ({ ...boulder, y: collisionField.sample(boulder.x, boulder.z) - boulder.radius * boulder.squash * 0.22 }));
-  const logs = DRIFT_LOGS.map((log) => ({ ...log, y: collisionField.sample(log.x, log.z) }));
-  const reefProps = placeReefProps(collisionField.sample, boulders);
-  const morayDens = placeMorayDens(reefProps);
-  const terrainMesh = buildTerrainMesh(ground, boulders, logs, quality);
-  const walkable = buildWalkability(ground, boulders, logs, reefProps);
-
-  function isWalkable(x, z) {
-    const column = Math.floor(x + WORLD_SIZE / 2);
-    const row = Math.floor(z + WORLD_SIZE / 2);
-    if (column < 0 || row < 0 || column >= WORLD_SIZE || row >= WORLD_SIZE) return false;
-    return walkable[row * WORLD_SIZE + column] === 1;
+function buildWalkability(ground, staticBlockers) {
+  const grid = createCellGrid(WORLD_BOUNDS, 1);
+  const { columns, rows } = grid;
+  const walkable = new Uint8Array(grid.cellCount);
+  const chunkColumns = Math.ceil(columns / WALK_CHUNK_CELLS);
+  const chunkRows = Math.ceil(rows / WALK_CHUNK_CELLS);
+  const chunkReady = new Uint8Array(chunkColumns * chunkRows);
+  const blockersByChunk = Array.from({ length: chunkColumns * chunkRows }, () => []);
+  const touchedRange = (center, radius, offset, cellLimit) => [Math.max(0, Math.floor(center - radius - offset)), Math.min(cellLimit - 1, Math.ceil(center + radius - offset))];
+  for (const disc of staticBlockers) {
+    const [firstColumn, lastColumn] = touchedRange(disc.x, disc.radius, WORLD_BOUNDS.minX, columns);
+    const [firstRow, lastRow] = touchedRange(disc.z, disc.radius, WORLD_BOUNDS.minZ, rows);
+    for (let chunkRow = Math.floor(firstRow / WALK_CHUNK_CELLS); chunkRow <= Math.floor(lastRow / WALK_CHUNK_CELLS); chunkRow++) {
+      for (let chunkColumn = Math.floor(firstColumn / WALK_CHUNK_CELLS); chunkColumn <= Math.floor(lastColumn / WALK_CHUNK_CELLS); chunkColumn++) blockersByChunk[chunkRow * chunkColumns + chunkColumn].push(disc);
+    }
   }
 
-  function waterLevelAt(x, z, seaLevel) {
-    return Math.max(seaLevel, retained.levelAt(x, z));
+  function blockDiscWithin(disc, firstColumnLimit, lastColumnLimit, firstRowLimit, lastRowLimit) {
+    const firstRow = Math.max(firstRowLimit, Math.floor(disc.z - disc.radius - WORLD_BOUNDS.minZ));
+    const lastRow = Math.min(lastRowLimit, Math.ceil(disc.z + disc.radius - WORLD_BOUNDS.minZ));
+    const firstColumn = Math.max(firstColumnLimit, Math.floor(disc.x - disc.radius - WORLD_BOUNDS.minX));
+    const lastColumn = Math.min(lastColumnLimit, Math.ceil(disc.x + disc.radius - WORLD_BOUNDS.minX));
+    for (let row = firstRow; row <= lastRow; row++) {
+      for (let column = firstColumn; column <= lastColumn; column++) {
+        if (Math.hypot(grid.centerX(column) - disc.x, grid.centerZ(row) - disc.z) < disc.radius) walkable[row * columns + column] = 0;
+      }
+    }
+  }
+
+  function computeChunk(chunkColumn, chunkRow) {
+    const firstColumn = chunkColumn * WALK_CHUNK_CELLS;
+    const lastColumn = Math.min(columns, firstColumn + WALK_CHUNK_CELLS) - 1;
+    const firstRow = chunkRow * WALK_CHUNK_CELLS;
+    const lastRow = Math.min(rows, firstRow + WALK_CHUNK_CELLS) - 1;
+    for (let row = firstRow; row <= lastRow; row++) {
+      for (let column = firstColumn; column <= lastColumn; column++) {
+        const x = grid.centerX(column);
+        const z = grid.centerZ(row);
+        if (x < PLAY_BOUNDS.minX || x > PLAY_BOUNDS.maxX || z < PLAY_BOUNDS.minZ || z > PLAY_BOUNDS.maxZ) continue;
+        const height = ground.heightAt(x, z);
+        if (height < DEEP_WATER_HEIGHT) continue;
+        const slope = Math.hypot(ground.heightAt(x + 0.6, z) - ground.heightAt(x - 0.6, z), ground.heightAt(x, z + 0.6) - ground.heightAt(x, z - 0.6)) / 1.2;
+        if (slope > MAX_WALKABLE_SLOPE) continue;
+        walkable[row * columns + column] = 1;
+      }
+    }
+    for (const disc of blockersByChunk[chunkRow * chunkColumns + chunkColumn]) blockDiscWithin(disc, firstColumn, lastColumn, firstRow, lastRow);
+    chunkReady[chunkRow * chunkColumns + chunkColumn] = 1;
+  }
+
+  function ensureCell(column, row) {
+    const chunk = Math.floor(row / WALK_CHUNK_CELLS) * chunkColumns + Math.floor(column / WALK_CHUNK_CELLS);
+    if (!chunkReady[chunk]) computeChunk(chunk % chunkColumns, Math.floor(chunk / chunkColumns));
+  }
+
+  function isCellWalkable(column, row) {
+    if (!grid.contains(column, row)) return false;
+    ensureCell(column, row);
+    return walkable[row * columns + column] === 1;
+  }
+
+  function ensureRange(firstColumn, lastColumn, firstRow, lastRow) {
+    for (let chunkRow = Math.floor(Math.max(0, firstRow) / WALK_CHUNK_CELLS); chunkRow <= Math.floor(Math.min(rows - 1, lastRow) / WALK_CHUNK_CELLS); chunkRow++) {
+      for (let chunkColumn = Math.floor(Math.max(0, firstColumn) / WALK_CHUNK_CELLS); chunkColumn <= Math.floor(Math.min(columns - 1, lastColumn) / WALK_CHUNK_CELLS); chunkColumn++) {
+        if (!chunkReady[chunkRow * chunkColumns + chunkColumn]) computeChunk(chunkColumn, chunkRow);
+      }
+    }
   }
 
   function blockCircle(x, z, radius) {
     const blocked = [];
-    for (let row = Math.floor(z - radius + WORLD_SIZE / 2); row <= Math.ceil(z + radius + WORLD_SIZE / 2); row++) {
-      for (let column = Math.floor(x - radius + WORLD_SIZE / 2); column <= Math.ceil(x + radius + WORLD_SIZE / 2); column++) {
-        if (column < 0 || row < 0 || column >= WORLD_SIZE || row >= WORLD_SIZE) continue;
-        const index = row * WORLD_SIZE + column;
-        if (walkable[index] === 1 && Math.hypot(column + 0.5 - WORLD_SIZE / 2 - x, row + 0.5 - WORLD_SIZE / 2 - z) < radius) {
+    const firstRow = Math.floor(z - radius - WORLD_BOUNDS.minZ);
+    const lastRow = Math.ceil(z + radius - WORLD_BOUNDS.minZ);
+    const firstColumn = Math.floor(x - radius - WORLD_BOUNDS.minX);
+    const lastColumn = Math.ceil(x + radius - WORLD_BOUNDS.minX);
+    ensureRange(firstColumn, lastColumn, firstRow, lastRow);
+    for (let row = firstRow; row <= lastRow; row++) {
+      for (let column = firstColumn; column <= lastColumn; column++) {
+        if (!grid.contains(column, row)) continue;
+        const index = row * columns + column;
+        if (walkable[index] === 1 && Math.hypot(grid.centerX(column) - x, grid.centerZ(row) - z) < radius) {
           walkable[index] = 0;
           blocked.push(index);
         }
@@ -571,10 +571,47 @@ export function createWorld(quality) {
     for (const index of blocked) walkable[index] = 1;
   }
 
+  function prepareAround(x, z, radius, maximumChunks) {
+    let computed = 0;
+    const span = WALK_CHUNK_CELLS;
+    for (let chunkRow = Math.max(0, Math.floor((z - radius - WORLD_BOUNDS.minZ) / span)); chunkRow <= Math.min(chunkRows - 1, Math.floor((z + radius - WORLD_BOUNDS.minZ) / span)); chunkRow++) {
+      for (let chunkColumn = Math.max(0, Math.floor((x - radius - WORLD_BOUNDS.minX) / span)); chunkColumn <= Math.min(chunkColumns - 1, Math.floor((x + radius - WORLD_BOUNDS.minX) / span)); chunkColumn++) {
+        if (chunkReady[chunkRow * chunkColumns + chunkColumn]) continue;
+        if (computed >= maximumChunks) return computed;
+        computeChunk(chunkColumn, chunkRow);
+        computed++;
+      }
+    }
+    return computed;
+  }
+
+  return { grid, isCellWalkable, blockCircle, unblockCells, prepareAround };
+}
+
+export function createWorld(quality) {
+  const collisionField = buildCollisionField();
+  const retained = buildRetainedWater();
+  const ground = { heightAt: collisionField.sample, retained };
+  const boulders = BOULDERS.map((boulder) => ({ ...boulder, y: collisionField.sample(boulder.x, boulder.z) - boulder.radius * boulder.squash * 0.22 }));
+  const logs = DRIFT_LOGS.map((log) => ({ ...log, y: collisionField.sample(log.x, log.z) }));
+  const reefProps = placeReefProps(collisionField.sample, boulders);
+  const morayDens = placeMorayDens(reefProps);
+  const terrain = createTerrain({ heightAt, reefShareAt, reefOuterEdgeAt, retained, boulders, logs, quality });
+  const walkability = buildWalkability(ground, collectStaticBlockers(boulders, logs, reefProps));
+  const walkGrid = walkability.grid;
+
+  function isWalkable(x, z) {
+    return walkability.isCellWalkable(walkGrid.columnOf(x), walkGrid.rowOf(z));
+  }
+
+  function waterLevelAt(x, z, seaLevel) {
+    return Math.max(seaLevel, retained.levelAt(x, z));
+  }
+
   function randomSpot(random, accept, attempts = 400) {
     for (let attempt = 0; attempt < attempts; attempt++) {
-      const x = (random() * 2 - 1) * PLAY_HALF_SIZE;
-      const z = (random() * 2 - 1) * PLAY_HALF_SIZE;
+      const x = lerp(PLAY_BOUNDS.minX, PLAY_BOUNDS.maxX, random());
+      const z = lerp(PLAY_BOUNDS.minZ, PLAY_BOUNDS.maxZ, random());
       if (!isWalkable(x, z)) continue;
       const height = collisionField.sample(x, z);
       if (accept(x, z, height)) return { x, z, y: height };
@@ -582,7 +619,15 @@ export function createWorld(quality) {
     return null;
   }
 
-  return { ground, heightAt: collisionField.sample, retained, pools: retained.pools, boulders, logs, reefProps, morayDens, campProps: CAMP_PROPS, holdProps: HOLD_PROPS, isInHold, isInCamp, terrainMesh, walkable, isWalkable, isOnReef, waterLevelAt, randomSpot, createRandom, blockCircle, unblockCells };
+  function prepareAround(x, z, radius = 96, maximumChunks = 1) {
+    return collisionField.prepareAround(x, z, radius, maximumChunks) + walkability.prepareAround(x, z, radius, maximumChunks);
+  }
+
+  return {
+    ground, heightAt: collisionField.sample, retained, pools: retained.pools, boulders, logs, reefProps, morayDens, campProps: CAMP_PROPS, holdProps: HOLD_PROPS, isInHold, isInCamp,
+    terrain, terrainMesh: terrain.mesh, walkGrid, isCellWalkable: walkability.isCellWalkable, isWalkable, isOnReef, waterLevelAt, randomSpot, createRandom,
+    blockCircle: walkability.blockCircle, unblockCells: walkability.unblockCells, prepareAround, computedCollisionChunks: collisionField.computedChunkCount,
+  };
 }
 
 const GULL_TERRITORY_EDGE_Z = -92;

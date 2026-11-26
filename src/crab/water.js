@@ -80,7 +80,7 @@ void main() {
   vec4 swellB = texture2D(uWaveGradient, point * 0.0173 + vec2(-uTime * 0.0045, uTime * 0.0052) + 0.41);
   vec2 slope = (swellA.rg - 0.5) * 0.3 + (swellB.rg - 0.5) * 0.22 + (swellA.ba - 0.5) * 0.2 + (swellB.ba - 0.5) * 0.16;
   float calmNearShore = smoothstep(0.0, 1.6, directDepth);
-  float inPool = smoothstep(0.08, 0.3, texture2D(uRetained, point / uWorldSize + 0.5).g) * step(uSeaLevel, retainedLevel(point));
+  float inPool = smoothstep(0.08, 0.3, texture2D(uRetained, retainedUv(point)).g) * step(uSeaLevel, retainedLevel(point));
   slope *= mix(0.35, 1.0, calmNearShore) * mix(1.0, 0.55, inPool);
   vec3 ripple = rippleSlopeAndCrest(point);
   slope += ripple.xy;

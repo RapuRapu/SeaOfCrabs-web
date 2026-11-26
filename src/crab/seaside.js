@@ -1,6 +1,5 @@
 import * as THREE from 'three';
-
-export const WORLD_SIZE = 256;
+import { WORLD_BOUNDS, boundsWidth, boundsDepth } from './worldBounds.js';
 
 export const lighting = {
   sunDirection: new THREE.Vector3(-0.42, 0.6, 0.68).normalize(),
@@ -17,7 +16,8 @@ export const seaUniforms = {
   uTime: { value: 0 },
   uNoise: { value: null },
   uRetained: { value: null },
-  uWorldSize: { value: WORLD_SIZE },
+  uWorldMin: { value: new THREE.Vector2(WORLD_BOUNDS.minX, WORLD_BOUNDS.minZ) },
+  uWorldExtent: { value: new THREE.Vector2(boundsWidth(WORLD_BOUNDS), boundsDepth(WORLD_BOUNDS)) },
   uSunDirection: { value: lighting.sunDirection },
   uSunColor: { value: lighting.sunColor },
   uHorizonColor: { value: lighting.horizonColor },
@@ -31,14 +31,18 @@ uniform float uWetLevel;
 uniform float uTime;
 uniform sampler2D uNoise;
 uniform sampler2D uRetained;
-uniform float uWorldSize;
+uniform vec2 uWorldMin;
+uniform vec2 uWorldExtent;
 uniform vec3 uSunDirection;
 uniform vec3 uSunColor;
 uniform vec3 uHorizonColor;
 uniform vec3 uZenithColor;
 
+vec2 retainedUv(vec2 xz) {
+  return (xz - uWorldMin) / uWorldExtent;
+}
 float retainedLevel(vec2 xz) {
-  return texture2D(uRetained, xz / uWorldSize + 0.5).r;
+  return texture2D(uRetained, retainedUv(xz)).r;
 }
 float waterLevelAt(vec2 xz) {
   return max(uSeaLevel, retainedLevel(xz));
@@ -74,7 +78,7 @@ vSeaWorld = (modelMatrix * seaWorldPosition).xyz;
 
 const WET_COLOR_GLSL = /* glsl */ `
 #include <color_fragment>
-vec3 seaPool = texture2D(uRetained, vSeaWorld.xz / uWorldSize + 0.5).rgb;
+vec3 seaPool = texture2D(uRetained, retainedUv(vSeaWorld.xz)).rgb;
 float seaDepth = max(uSeaLevel, seaPool.r) - vSeaWorld.y;
 float seaWetEdge = (texture2D(uNoise, vSeaWorld.xz * 0.027).r - 0.5) * 0.9;
 float seaPoolWeight = smoothstep(0.22, 0.5, seaPool.g);

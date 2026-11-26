@@ -1,11 +1,9 @@
-import { WORLD_SIZE } from './seaside.js';
-
 const HEURISTIC_WEIGHT = 1.3;
 const MAX_EXPANSIONS = 60000;
 const NEIGHBORS = [[1, 0, 1], [-1, 0, 1], [0, 1, 1], [0, -1, 1], [1, 1, Math.SQRT2], [1, -1, Math.SQRT2], [-1, 1, Math.SQRT2], [-1, -1, Math.SQRT2]];
 
 export function createNavigation(world) {
-  const cellCount = WORLD_SIZE * WORLD_SIZE;
+  const { columns, cellCount } = world.walkGrid;
   const costSoFar = new Float32Array(cellCount);
   const cameFrom = new Int32Array(cellCount);
   const visitStamp = new Uint32Array(cellCount);
@@ -15,10 +13,10 @@ export function createNavigation(world) {
   const heapScores = new Float32Array(cellCount);
   let heapSize = 0;
 
-  const cellOf = (x, z) => Math.floor(z + WORLD_SIZE / 2) * WORLD_SIZE + Math.floor(x + WORLD_SIZE / 2);
-  const cellX = (cell) => (cell % WORLD_SIZE) + 0.5 - WORLD_SIZE / 2;
-  const cellZ = (cell) => Math.floor(cell / WORLD_SIZE) + 0.5 - WORLD_SIZE / 2;
-  const cellWalkable = (column, row) => column >= 0 && row >= 0 && column < WORLD_SIZE && row < WORLD_SIZE && world.walkable[row * WORLD_SIZE + column] === 1;
+  const cellOf = (x, z) => world.walkGrid.rowOf(z) * columns + world.walkGrid.columnOf(x);
+  const cellX = (cell) => world.walkGrid.centerX(cell % columns);
+  const cellZ = (cell) => world.walkGrid.centerZ(Math.floor(cell / columns));
+  const cellWalkable = (column, row) => world.isCellWalkable(column, row);
 
   function heapPush(cell, score) {
     let position = heapSize++;
@@ -88,8 +86,8 @@ export function createNavigation(world) {
     if (clearLine(start.x, start.z, goal.x, goal.z)) return [{ x: goal.x, z: goal.z }];
     const startCell = cellOf(start.x, start.z);
     const goalCell = cellOf(goal.x, goal.z);
-    const goalColumn = goalCell % WORLD_SIZE;
-    const goalRow = Math.floor(goalCell / WORLD_SIZE);
+    const goalColumn = goalCell % columns;
+    const goalRow = Math.floor(goalCell / columns);
     stamp++;
     heapSize = 0;
     costSoFar[startCell] = 0;
@@ -107,14 +105,14 @@ export function createNavigation(world) {
         break;
       }
       expansions++;
-      const column = cell % WORLD_SIZE;
-      const row = (cell - column) / WORLD_SIZE;
+      const column = cell % columns;
+      const row = (cell - column) / columns;
       for (const [stepColumn, stepRow, stepCost] of NEIGHBORS) {
         const nextColumn = column + stepColumn;
         const nextRow = row + stepRow;
         if (!cellWalkable(nextColumn, nextRow)) continue;
         if (stepColumn !== 0 && stepRow !== 0 && (!cellWalkable(column + stepColumn, row) || !cellWalkable(column, row + stepRow))) continue;
-        const next = nextRow * WORLD_SIZE + nextColumn;
+        const next = nextRow * columns + nextColumn;
         const cost = costSoFar[cell] + stepCost;
         if (visitStamp[next] === stamp && cost >= costSoFar[next]) continue;
         visitStamp[next] = stamp;

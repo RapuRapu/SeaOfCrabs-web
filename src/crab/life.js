@@ -24,7 +24,8 @@ attribute vec4 aBlade;
 uniform float uTime;
 uniform float uSeaLevel;
 uniform sampler2D uRetained;
-uniform float uWorldSize;
+uniform vec2 uWorldMin;
+uniform vec2 uWorldExtent;
 uniform vec3 uCrabPosition;
 `;
 
@@ -54,7 +55,7 @@ const bladeMotion = (floats) => ({
     transformed.xz += vec2(-sin(aBlade.z), cos(aBlade.z)) * bladeCentreness * aBlade.y * ${SEAWEED_MIDRIB_CUP.toFixed(2)} * (1.0 - bladeAlong * 0.6);` : ''}
     ${CRAB_PUSH_GLSL}
     ${floats ? `
-    float bladeSurface = max(uSeaLevel, texture2D(uRetained, transformed.xz / uWorldSize + 0.5).r) + ${FLOATING_LEAF_LIFT.toFixed(3)};
+    float bladeSurface = max(uSeaLevel, texture2D(uRetained, (transformed.xz - uWorldMin) / uWorldExtent).r) + ${FLOATING_LEAF_LIFT.toFixed(3)};
     float bladeExcess = transformed.y - bladeSurface;
     float floatingShare = smoothstep(-${FLOATING_FOLD_SOFTNESS.toFixed(2)}, ${FLOATING_FOLD_SOFTNESS.toFixed(2)}, bladeExcess);
     if (floatingShare > 0.0) {

@@ -4,7 +4,8 @@ import { createPerformanceMonitor } from '../performance.js';
 import { QUALITY_LEVELS, chosenQualityName, storeQualityName } from './quality.js';
 import { seaUniforms, SEA_COMMON_GLSL, lighting, cutawayUniforms } from './seaside.js';
 import { createNoiseTexture, createWaveGradientTexture } from './textures.js';
-import { createWorld, TIDE_MIDDLE, TIDE_AMPLITUDE, TIDE_PERIOD_SECONDS, HOME_BEACH_ENEMIES, REEF_ENEMIES, CAMP_ENEMIES, CAMP, isInCamp, HOLD_ENEMIES, HOLD, isInHold, PLAY_HALF_SIZE } from './world.js';
+import { createWorld, TIDE_MIDDLE, TIDE_AMPLITUDE, TIDE_PERIOD_SECONDS, HOME_BEACH_ENEMIES, REEF_ENEMIES, CAMP_ENEMIES, CAMP, isInCamp, HOLD_ENEMIES, HOLD, isInHold, PLAY_BOUNDS } from './world.js';
+import { isInsideBounds } from './worldBounds.js';
 import { createPipeline } from './pipeline.js';
 import { createWater } from './water.js';
 import { createProps } from './props.js';
@@ -387,7 +388,7 @@ const holdProps = createHoldProps(scene, world, quality);
 const life = createLife(scene, world, quality);
 
 const pipeline = createPipeline(renderer, quality);
-const fog = createFog({ halfSize: PLAY_HALF_SIZE, saved: save.fog });
+const fog = createFog({ bounds: PLAY_BOUNDS, saved: save.fog });
 pipeline.attachFog(fog.uniforms);
 const water = createWater(createWaveGradientTexture(), pipeline.overlayUniforms, quality.rippleCapacity);
 pipeline.overlayScene.add(water.mesh);
@@ -416,7 +417,7 @@ function applyWornLook() {
 applyWornLook();
 const resources = createResources(scene, { scene: pipeline.overlayScene, uniforms: pipeline.overlayUniforms }, world, quality, save.nodes, STARTER_SPOTS);
 const hud = createHud(qualityName);
-const mapView = createMapView(hud.root, { world, fog, halfSize: PLAY_HALF_SIZE, waterLevel: TIDE_MIDDLE + TIDE_AMPLITUDE, cameraYaw: CAMERA_YAW, onClose: () => mapView.close() });
+const mapView = createMapView(hud.root, { world, fog, halfSize: PLAY_BOUNDS.maxX, waterLevel: TIDE_MIDDLE + TIDE_AMPLITUDE, cameraYaw: CAMERA_YAW, onClose: () => mapView.close() });
 const tracks = createTracks(scene, world);
 const ripples = createRipples(water.uniforms);
 const workshop = createWorkbenchModel(scene, world, quality, WORKSHOP_SPOT, hud.root);
@@ -1394,7 +1395,7 @@ function showExitPlacementSpots() {
 
 function exitCellProblem(column, row) {
   const surface = burrow.surfacePointOf(column, row);
-  if (!surface || Math.abs(surface.x) > PLAY_HALF_SIZE - 4 || Math.abs(surface.z) > PLAY_HALF_SIZE - 4) return 'outside';
+  if (!surface || !isInsideBounds(PLAY_BOUNDS, surface.x, surface.z, 4)) return 'outside';
   if (!fog.isRevealed(surface.x, surface.z)) return 'unexplored';
   if (isInHold(surface.x, surface.z)) return 'boss';
   for (const enemy of enemies.list) {
@@ -2767,6 +2768,8 @@ function updateCamera(deltaTime, snap) {
   if (camera.position.y < minimumHeight) camera.position.y = minimumHeight;
   camera.lookAt(cameraFocus);
   camera.updateMatrixWorld();
+  if (!underground) world.terrain.follow(cameraFocus.x, cameraFocus.z);
+  world.prepareAround(player.x, player.z);
   const reefInView = !underground && cameraFocus.z + cameraDistance * REEF_VIEW_REACH_PER_DISTANCE > REEF_VIEW_THRESHOLD_Z;
   cutawayUniforms.uCutCamera.value.copy(camera.position);
   cutawayUniforms.uCutPlayer.value.set(player.x, underground ? -1000 : player.y + 1, player.z);

@@ -178,8 +178,9 @@ export function createPipeline(renderer, quality) {
     uFinalInverseViewProjection: { value: new THREE.Matrix4() },
     uFogEnabled: { value: 0 },
     tFog: { value: null },
-    uFogHalfSize: { value: 1 },
-    uFogTexel: { value: 1 },
+    uFogMin: { value: new THREE.Vector2(-1, -1) },
+    uFogExtent: { value: new THREE.Vector2(2, 2) },
+    uFogTexel: { value: new THREE.Vector2(1, 1) },
   });
 
   const drawingSize = new THREE.Vector2();

@@ -1,14 +1,15 @@
 import * as THREE from 'three';
 
-export const FOG_RESOLUTION = 256;
+const FOG_UNITS_PER_TEXEL = 236 / 256;
 export const FOG_REVEAL_RADIUS = 20;
 const REVEAL_STEP_DISTANCE = 1;
 const REVEALED = 255;
 
 export const FOG_GLSL = /* glsl */ `
 uniform sampler2D tFog;
-uniform float uFogHalfSize;
-uniform float uFogTexel;
+uniform vec2 uFogMin;
+uniform vec2 uFogExtent;
+uniform vec2 uFogTexel;
 float fogHash(vec2 point) {
   return fract(sin(dot(point, vec2(127.1, 311.7))) * 43758.5453);
 }
@@ -21,7 +22,7 @@ float fogNoise(vec2 point) {
   return mix(bottom, top, local.y);
 }
 float fogRevealAt(vec2 worldXZ) {
-  vec2 uv = worldXZ / (2.0 * uFogHalfSize) + 0.5;
+  vec2 uv = (worldXZ - uFogMin) / uFogExtent;
   float total = 0.0;
   for (int stepX = -2; stepX <= 2; stepX++) {
     for (int stepY = -2; stepY <= 2; stepY++) {
@@ -43,19 +44,22 @@ vec3 applyFog(vec3 color, vec2 worldXZ, float time) {
 }
 `;
 
-export function createFog({ halfSize, saved }) {
-  const data = new Uint8Array(FOG_RESOLUTION * FOG_RESOLUTION);
-  const texture = new THREE.DataTexture(data, FOG_RESOLUTION, FOG_RESOLUTION, THREE.RedFormat, THREE.UnsignedByteType);
+export function createFog({ bounds, saved }) {
+  const columns = Math.round((bounds.maxX - bounds.minX) / FOG_UNITS_PER_TEXEL);
+  const rows = Math.round((bounds.maxZ - bounds.minZ) / FOG_UNITS_PER_TEXEL);
+  const unitsPerTexel = (bounds.maxX - bounds.minX) / columns;
+  const data = new Uint8Array(columns * rows);
+  const texture = new THREE.DataTexture(data, columns, rows, THREE.RedFormat, THREE.UnsignedByteType);
   texture.minFilter = THREE.LinearFilter;
   texture.magFilter = THREE.LinearFilter;
   texture.wrapS = THREE.ClampToEdgeWrapping;
   texture.wrapT = THREE.ClampToEdgeWrapping;
   texture.needsUpdate = true;
-  const unitsPerTexel = (halfSize * 2) / FOG_RESOLUTION;
   let lastReveal = null;
   let changed = false;
 
-  const texelOf = (worldCoordinate) => Math.floor((worldCoordinate + halfSize) / unitsPerTexel);
+  const columnOf = (x) => Math.floor((x - bounds.minX) / unitsPerTexel);
+  const rowOf = (z) => Math.floor((z - bounds.minZ) / unitsPerTexel);
 
   if (saved) unpack(saved);
 
@@ -74,12 +78,12 @@ export function createFog({ halfSize, saved }) {
 
   function reveal(x, z, radius = FOG_REVEAL_RADIUS) {
     const radiusTexels = radius / unitsPerTexel;
-    const centerColumn = (x + halfSize) / unitsPerTexel;
-    const centerRow = (z + halfSize) / unitsPerTexel;
-    for (let row = Math.max(0, Math.floor(centerRow - radiusTexels)); row <= Math.min(FOG_RESOLUTION - 1, Math.ceil(centerRow + radiusTexels)); row++) {
-      for (let column = Math.max(0, Math.floor(centerColumn - radiusTexels)); column <= Math.min(FOG_RESOLUTION - 1, Math.ceil(centerColumn + radiusTexels)); column++) {
+    const centerColumn = (x - bounds.minX) / unitsPerTexel;
+    const centerRow = (z - bounds.minZ) / unitsPerTexel;
+    for (let row = Math.max(0, Math.floor(centerRow - radiusTexels)); row <= Math.min(rows - 1, Math.ceil(centerRow + radiusTexels)); row++) {
+      for (let column = Math.max(0, Math.floor(centerColumn - radiusTexels)); column <= Math.min(columns - 1, Math.ceil(centerColumn + radiusTexels)); column++) {
         if (Math.hypot(column + 0.5 - centerColumn, row + 0.5 - centerRow) > radiusTexels) continue;
-        const index = row * FOG_RESOLUTION + column;
+        const index = row * columns + column;
         if (data[index] !== REVEALED) {
           data[index] = REVEALED;
           changed = true;
@@ -89,11 +93,11 @@ export function createFog({ halfSize, saved }) {
   }
 
   function revealWhere(predicate) {
-    for (let row = 0; row < FOG_RESOLUTION; row++) {
-      for (let column = 0; column < FOG_RESOLUTION; column++) {
-        const x = (column + 0.5) * unitsPerTexel - halfSize;
-        const z = (row + 0.5) * unitsPerTexel - halfSize;
-        if (predicate(x, z)) data[row * FOG_RESOLUTION + column] = REVEALED;
+    for (let row = 0; row < rows; row++) {
+      for (let column = 0; column < columns; column++) {
+        const x = (column + 0.5) * unitsPerTexel + bounds.minX;
+        const z = (row + 0.5) * unitsPerTexel + bounds.minZ;
+        if (predicate(x, z)) data[row * columns + column] = REVEALED;
       }
     }
     changed = true;
@@ -106,10 +110,10 @@ export function createFog({ halfSize, saved }) {
   }
 
   function isRevealed(x, z) {
-    const column = texelOf(x);
-    const row = texelOf(z);
-    if (column < 0 || row < 0 || column >= FOG_RESOLUTION || row >= FOG_RESOLUTION) return false;
-    return data[row * FOG_RESOLUTION + column] === REVEALED;
+    const column = columnOf(x);
+    const row = rowOf(z);
+    if (column < 0 || row < 0 || column >= columns || row >= rows) return false;
+    return data[row * columns + column] === REVEALED;
   }
 
   function upload() {
@@ -120,7 +124,7 @@ export function createFog({ halfSize, saved }) {
 
   return {
     texture,
-    uniforms: { tFog: { value: texture }, uFogHalfSize: { value: halfSize }, uFogTexel: { value: 1 / FOG_RESOLUTION } },
+    uniforms: { tFog: { value: texture }, uFogMin: { value: new THREE.Vector2(bounds.minX, bounds.minZ) }, uFogExtent: { value: new THREE.Vector2(bounds.maxX - bounds.minX, bounds.maxZ - bounds.minZ) }, uFogTexel: { value: new THREE.Vector2(1 / columns, 1 / rows) } },
     reveal,
     revealWhere,
     follow,
