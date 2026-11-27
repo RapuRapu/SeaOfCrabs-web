@@ -86,7 +86,7 @@ export function createWorkbenchModel(scene, world, quality, spot, labelParent) {
   marker.position.set(spot.x, world.heightAt(spot.x, spot.z) + 0.1, spot.z);
   marker.visible = false;
   scene.add(marker);
-  const label = element('div', 'world-label burrow-label hidden', labelParent, 'Workshop');
+  const label = element('div', 'world-label home-label hidden', labelParent, 'Workshop');
   const labelPoint = new THREE.Vector3();
 
   return {

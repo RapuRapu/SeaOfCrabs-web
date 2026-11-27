@@ -14,28 +14,19 @@ FLOW = r'''
 
   Object.assign(d.save.inventory, { shellBits: 20, driftwood: 30, seaLettuce: 20, pearls: 3, pebbles: 6, clay: 10 });
   d.buildWorkshop();
-  const dugBefore = d.save.inventory.sand || 0;
-  const wall = [];
-  for (let column = 0; column < 31 && !wall.length; column++) for (let row = 0; row < 31 && !wall.length; row++) if (d.burrow.canDig(column, row)) wall.push([column, row]);
-  if (!d.isUnderground()) d.enterBurrow(d.burrow.travelPoints()[0]);
-  out.digStarted = d.startDigCell(wall[0][0], wall[0][1]) !== false;
-  for (let time = 0; time < 25 && (d.save.inventory.sand || 0) === dugBefore; time += 1 / 30) d.simulate(1 / 30);
-  out.digGivesSand = (d.save.inventory.sand || 0) === dugBefore + 2;
-
-  const free = () => d.burrow.freeCells();
-  const place = (kind) => { const cell = free()[0]; return d.buildStation(kind, cell.column, cell.row); };
+  const place = (kind) => d.buildAtDefaultSpot(kind);
   out.firstNest = place('helperNest');
   out.secondNestBlocked = d.stationBuildProblem('helperNest') !== null && !place('helperNest');
-  out.pantryNeedsHeart = d.stationBuildProblem('pantry') === 'Needs Burrow heart' && !place('pantry');
-  out.heartBuilt = place('burrowHeart') && d.burrowStage() === 2;
+  out.pantryNeedsHeart = d.stationBuildProblem('pantry') === 'Needs Colony heart' && !place('pantry');
+  out.heartBuilt = place('burrowHeart') && d.colonyStage() === 2;
   out.secondNestAfterHeart = place('helperNest');
   out.pantryBuilt = place('pantry');
 
   const helper = d.helpers.rescue({ id: 'test-spot' });
   out.helperRescued = Boolean(helper);
-  const pantry = d.burrow.state.stations.find((station) => station.kind === 'pantry');
+  const pantry = d.home.state.stations.find((station) => station.kind === 'pantry');
   pantry.box.inventory.driedKelp = 1;
-  Object.assign(helper, { state: 'resting', inside: true, mealIn: 0, restTimer: 999 });
+  Object.assign(helper, { state: 'resting', mealIn: 0, restTimer: 999 });
   d.helpers.update(0.1, 0);
   out.ateFromPantry = pantry.box.inventory.driedKelp === 0 && !helper.hungry && helper.mealIn > 1000;
   helper.mealIn = 0;
@@ -43,7 +34,7 @@ FLOW = r'''
   out.hungryWithoutFood = helper.hungry === true;
   const lines = [...document.querySelectorAll('#hud .game-log .log-line')].map((line) => line.textContent);
   out.hungerLogged = lines.some((line) => line.includes('is hungry'));
-  const nest = d.burrow.state.stations.find((station) => station.id === helper.nestId);
+  const nest = d.home.state.stations.find((station) => station.id === helper.nestId);
   nest.box.inventory.driedKelp = 2;
   helper.mealIn = 0;
   d.helpers.update(0.1, 0);

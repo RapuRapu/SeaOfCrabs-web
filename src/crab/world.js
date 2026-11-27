@@ -5,7 +5,7 @@ import { createTerrain } from './terrain.js';
 import { shapeChannel, isTidalGround, channelRocks, channelInfluenceAt, thalwegPointAt, isNearCrossing } from './channel.js';
 
 export { channelCenterAt, sandbarCenterZAt, channelInfluenceAt, isOnChannelThalweg, thalwegPointAt, isNearCrossing } from './channel.js';
-import { WEST_REEF, DEEP_REEF, SANDBAR, CAMP_FLAT, GULL_PERCHES, relocateLegacyPoint, SHORE, POOLS, REEF_INNER_EDGE_Z, REEF_OUTER_EDGE_Z, REEF_DROP_LENGTH, REEF_EDGE_RAGGEDNESS, REEF_FLAT_HEIGHT, REEF_HIGHEST, BOULDERS, DRIFT_LOGS, LOBSTER_LAIR, REEF_PROP_KEEP_CLEAR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS } from './worldMap.js';
+import { WEST_REEF, DEEP_REEF, SANDBAR, CAMP_FLAT, GULL_PERCHES, relocateLegacyPoint, SHORE, POOLS, REEF_INNER_EDGE_Z, REEF_OUTER_EDGE_Z, REEF_DROP_LENGTH, REEF_EDGE_RAGGEDNESS, REEF_FLAT_HEIGHT, REEF_HIGHEST, BOULDERS, DRIFT_LOGS, LOBSTER_LAIR, REEF_PROP_KEEP_CLEAR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS, HOME_YARD, SHELTER } from './worldMap.js';
 
 export { relocateLegacyPoint, WORLD_BOUNDS, PLAY_BOUNDS, LOBSTER_LAIR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS };
 export const DEEP_WATER_HEIGHT = -6.2;
@@ -87,9 +87,15 @@ function shapeLandmarks(x, z, height) {
     if (campLevel === null) campLevel = beachHeight(CAMP.x, CAMP.z);
     height = lerp(campLevel, height, smoothstep(CAMP.radius * CAMP_FLAT.innerShare, CAMP.radius * CAMP_FLAT.outerShare, fromCamp));
   }
+  const fromYard = Math.hypot(x - HOME_YARD.x, z - HOME_YARD.z);
+  if (fromYard < HOME_YARD.radius + HOME_YARD.blend) {
+    const raised = lerp(HOME_YARD.floor, height, smoothstep(HOME_YARD.radius * 0.55, HOME_YARD.radius + HOME_YARD.blend, fromYard));
+    height = Math.max(height, raised);
+  }
   return shapeChannel(x, z, height);
 }
 
+export { HOME_YARD, SHELTER };
 export const isSandbarOpen = (seaLevel) => seaLevel < SANDBAR.top + SANDBAR.openBelowTop;
 
 
@@ -419,11 +425,24 @@ export function isInCamp(x, z) {
   return Math.hypot(x - CAMP.x, z - CAMP.z) < CAMP.radius && z > CAMP.z + CAMP.backEdgeOffset;
 }
 
+const SHELTER_CRAWL_HEIGHT = 0.9;
+
+function shelterLog(sampleHeight, boulder) {
+  const { lowX, lowZ, highX, highZ, radius, seed } = SHELTER.log;
+  const lowGround = sampleHeight(lowX, lowZ);
+  const restDistance = Math.hypot(highX - boulder.x, highZ - boulder.z) / boulder.radius;
+  const restHeight = boulder.y + boulder.radius * boulder.squash * Math.sqrt(Math.max(0, 1 - restDistance * restDistance)) * 0.95;
+  return { x: (lowX + highX) / 2, z: (lowZ + highZ) / 2, heading: Math.atan2(highZ - lowZ, highX - lowX), length: Math.hypot(highX - lowX, highZ - lowZ), radius, seed, y: lowGround - radius * 0.35, rise: restHeight - lowGround };
+}
+
 function collectStaticBlockers(boulders, logs, reefProps) {
   const discs = [];
   for (const boulder of boulders) discs.push({ x: boulder.x, z: boulder.z, radius: boulder.radius * 0.92 + 0.6 });
   for (const log of logs) {
-    for (let along = -log.length / 2; along <= log.length / 2; along += 1) discs.push({ x: log.x + Math.cos(log.heading) * along, z: log.z + Math.sin(log.heading) * along, radius: log.radius + 0.5 });
+    for (let along = -log.length / 2; along <= log.length / 2; along += 1) {
+      if (log.rise && (along / log.length + 0.5) * log.rise > SHELTER_CRAWL_HEIGHT) continue;
+      discs.push({ x: log.x + Math.cos(log.heading) * along, z: log.z + Math.sin(log.heading) * along, radius: log.radius + 0.5 });
+    }
   }
   for (const prop of Object.values(reefProps).flat()) discs.push({ x: prop.x, z: prop.z, radius: prop.blockRadius });
   for (const prop of CAMP_PROPS) discs.push(...CAMP_BLOCKERS[prop.kind](prop));
@@ -560,8 +579,8 @@ export function createWorld(quality) {
   const collisionField = buildCollisionField();
   const retained = buildRetainedWater();
   const ground = { heightAt: collisionField.sample, retained };
-  const boulders = [...BOULDERS, ...channelRocks()].map((boulder) => ({ ...boulder, y: collisionField.sample(boulder.x, boulder.z) - boulder.radius * boulder.squash * 0.22 }));
-  const logs = DRIFT_LOGS.map((log) => ({ ...log, y: collisionField.sample(log.x, log.z) }));
+  const boulders = [...BOULDERS, SHELTER.boulder, ...channelRocks()].map((boulder) => ({ ...boulder, y: collisionField.sample(boulder.x, boulder.z) - boulder.radius * boulder.squash * 0.22 }));
+  const logs = [...DRIFT_LOGS.map((log) => ({ ...log, y: collisionField.sample(log.x, log.z) })), shelterLog(collisionField.sample, boulders.find((boulder) => boulder.seed === SHELTER.boulder.seed))];
   const reefProps = placeReefProps(collisionField.sample, boulders);
   const morayDens = placeMorayDens(reefProps);
   const terrain = createTerrain({ heightAt, reefShareAt, reefOuterEdgeAt, channelInfluenceAt, retained, boulders, logs, quality });

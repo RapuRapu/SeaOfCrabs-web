@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { attackOf, defenseOf } from './looting.js';
 import { createHermit } from './hermit.js';
 import { RESOURCE_TYPES, stackLimitOf } from './resources.js';
-import { BURROW_LAYER, BURROW_ORIGIN } from './burrow.js';
 import { RACK_BATCH, RACK_REACH, RACK_INPUTS, rackInputIn } from './rack.js';
 import { PROCESS_RECIPES, freeSlots as processFreeSlots, loadStation, collectStation, processView } from './processing.js';
 import { SHELLS, CLAWS, NAKED, BINDINGS, REINFORCEMENTS, shellDefenseOf, clawAttackOf } from './gear.js';
@@ -26,11 +25,11 @@ const MEAL_RETRY_SECONDS = 15;
 const FLEE_SPEED = 6;
 const GATHER_SLOWDOWN = 1.6;
 const GATHER_REACH = 1.4;
-const ENTRANCE_REACH = 1.6;
 const DANGER_DISTANCE = 7;
 const BITE_DISTANCE = 1.7;
 const REST_SECONDS = 4;
 const IDLE_RETRY_SECONDS = 8;
+const YARD_TRIP_STATES = new Set(['toProcess', 'toSource', 'toTarget', 'toNest']);
 const NEST_SLOTS = [[-0.75, 0.25], [-0.15, -0.45], [-0.05, 0.6]];
 const HELPER_BASE_ATTACK = 2;
 const HELPER_HEALTH_PER_LEVEL = 3;
@@ -38,6 +37,7 @@ const HELPER_ATTACK_INTERVAL = 1.2;
 const WIN_MARGIN = 1.25;
 const FLEE_HEALTH_SHARE = 0.3;
 const FIGHT_REACH = 0.9;
+const REACH_TOLERANCE = 0.05;
 const FIGHT_GIVE_UP_DISTANCE = 12;
 const HELPER_REGEN_PER_SECOND = 1;
 export const HELPER_BAG_SLOTS = 2;
@@ -87,10 +87,10 @@ export function expectsToWin(helper, enemy) {
   return (enemy.health / helperPerSecond) * WIN_MARGIN < helper.health / enemyPerSecond;
 }
 
-export function createHelpers(scene, { world, navigation, resources, enemies, quality, saved, rack, burrow, boxOf, strandedSpots, getPlayer, isUnderground, onDeposit, onLost, onSound, onLog = () => {}, playerVitals = () => null, healPlayer = () => {}, onHealFloat = () => {}, upkeepActive = () => false, feedHelper = () => false, boardTask = () => null }) {
+export function createHelpers(scene, { world, navigation, resources, enemies, quality, saved, rack, home, boxOf, strandedSpots, getPlayer, onDeposit, onLost, onSound, onLog = () => {}, playerVitals = () => null, healPlayer = () => {}, onHealFloat = () => {}, upkeepActive = () => false, feedHelper = () => false, boardTask = () => null }) {
   const savedState = Array.isArray(saved) ? { list: saved, rescued: [] } : saved || { list: [], rescued: [] };
   const list = savedState.list.map((entry) => {
-    const helper = { job: null, nestId: null, carryOrder: null, gear: { shell: null, claws: null }, level: 1, experience: 0, bag: emptyBag(), itemUse: 'both', ...entry, helperId: entry.id, state: 'resting', inside: true, path: [], pathIndex: 0, restTimer: 1 + Math.random() * 2, carrying: entry.carrying || null, load: entry.load || 0, targetId: null };
+    const helper = { job: null, nestId: null, carryOrder: null, gear: { shell: null, claws: null }, level: 1, experience: 0, bag: emptyBag(), itemUse: 'both', ...entry, helperId: entry.id, state: 'resting', path: [], pathIndex: 0, restTimer: 1 + Math.random() * 2, carrying: entry.carrying || null, load: entry.load || 0, targetId: null };
     helper.health = helperMaxHealth(helper);
     return helper;
   });
@@ -100,7 +100,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   function crabFor(key, tintIndex) {
     if (!crabs.has(key)) {
       const crab = createHermit(scene, quality, NAKED.look, { crabModel: 'helper', scale: HELPER_SIZE, bodyTint: HELPER_TINTS[tintIndex % HELPER_TINTS.length] });
-      crabs.set(key, { crab, gearKey: null, inside: null });
+      crabs.set(key, { crab, gearKey: null });
     }
     return crabs.get(key);
   }
@@ -111,11 +111,9 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   const carryMesh = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.3, 1), new THREE.MeshBasicMaterial({ color: 0xffffff }), HELPER_LIMIT);
   carryMesh.count = 0;
   carryMesh.frustumCulled = false;
-  carryMesh.layers.enable(BURROW_LAYER);
   const carryOutline = new THREE.InstancedMesh(new THREE.IcosahedronGeometry(0.38, 1), new THREE.MeshBasicMaterial({ color: 0x1a1208, side: THREE.BackSide }), HELPER_LIMIT);
   carryOutline.count = 0;
   carryOutline.frustumCulled = false;
-  carryOutline.layers.enable(BURROW_LAYER);
   const strandedRings = new THREE.InstancedMesh(new THREE.RingGeometry(1.1, 1.4, 40).rotateX(-Math.PI / 2), new THREE.MeshBasicMaterial({ color: new THREE.Color(3.2, 2.4, 1.0), transparent: true, opacity: 0.7, depthWrite: false, fog: false }), strandedSpots.length || 1);
   strandedRings.count = 0;
   strandedRings.frustumCulled = false;
@@ -125,20 +123,14 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   const projected = new THREE.Vector3();
 
   const nodeById = (id) => resources.nodes.find((node) => node.id === id) || null;
-  const nestOf = (helper) => burrow.state.stations.find((station) => station.id === helper.nestId) || null;
-  const stationById = (id) => burrow.state.stations.find((station) => station.id === id) || null;
+  const nestOf = (helper) => home.state.stations.find((station) => station.id === helper.nestId) || null;
+  const stationById = (id) => home.state.stations.find((station) => station.id === id) || null;
   const depositStationOf = (helper) => (helper.tripTargetId && stationById(helper.tripTargetId)) || nestOf(helper);
   const nestSpot = (helper) => {
     const nest = nestOf(helper);
-    return nest ? burrow.stationSpot(nest) : null;
+    return nest ? home.stationSpot(nest) : null;
   };
 
-  function homePoint(helper) {
-    const home = nestSpot(helper);
-    const points = burrow.travelPoints();
-    if (!home || !points.length) return points[0] || null;
-    return points.reduce((best, point) => (Math.hypot(point.below.x - home.x, point.below.z - home.z) < Math.hypot(best.below.x - home.x, best.below.z - home.z) ? point : best));
-  }
 
   function release(helper) {
     const node = helper.targetId && nodeById(helper.targetId);
@@ -147,8 +139,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   }
 
   function walkTo(helper, x, z) {
-    const space = helper.inside ? burrow.space : navigation;
-    const path = space.findPath(helper.x, helper.z, x, z);
+    const path = navigation.findPath(helper.x, helper.z, x, z);
     helper.path = path;
     helper.pathIndex = 0;
     return path.length > 0;
@@ -158,19 +149,13 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     const spot = nestSpot(helper);
     if (!spot) return;
     const slot = NEST_SLOTS[nestMates(helper).indexOf(helper) % NEST_SLOTS.length];
-    const free = burrow.space.nearestWalkable(spot.x + slot[0] * 1.6, spot.z + slot[1] * 1.6 + 1.2) || spot;
-    Object.assign(helper, { x: free.x, z: free.z, inside: true });
+    const free = navigation.nearestWalkable(spot.x + slot[0] * 2.2, spot.z + slot[1] * 2.2 + 1.6, 6) || spot;
+    Object.assign(helper, { x: free.x, z: free.z, y: world.heightAt(free.x, free.z) });
   }
 
   const nestMates = (helper) => list.filter((other) => other.nestId === helper.nestId);
 
-  function stepOutside(helper) {
-    const point = homePoint(helper);
-    if (!point) return false;
-    const start = navigation.nearestWalkable(point.surface.x + 1.6, point.surface.z - 1.2, 6) || point.surface;
-    Object.assign(helper, { x: start.x, z: start.z, inside: false, exitPoint: point });
-    return true;
-  }
+  const stepOutside = (helper) => Boolean(nestSpot(helper));
 
   function leaveForRack(helper) {
     const nest = nestOf(helper);
@@ -198,7 +183,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     const recipe = PROCESS_RECIPES[station.kind];
     const canLoad = processFreeSlots(station) > 0 && (nest.box.inventory[recipe.input] || 0) >= recipe.inputAmount;
     if (!canLoad && processView(station).ready === 0) return false;
-    const spot = burrow.stationSpot(station);
+    const spot = home.stationSpot(station);
     if (!walkTo(helper, spot.x, spot.z)) return false;
     if (canLoad) {
       nest.box.inventory[recipe.input] -= recipe.inputAmount;
@@ -216,9 +201,9 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     if (!source || !target || order.fromId === order.toId) return false;
     const type = order.material || Object.keys(source.inventory).find((key) => source.inventory[key] > 0);
     if (!type || !(source.inventory[type] > 0)) return false;
-    const fromStation = burrow.state.stations.find((station) => station.id === order.fromId);
+    const fromStation = home.state.stations.find((station) => station.id === order.fromId);
     if (!fromStation) return false;
-    const spot = burrow.stationSpot(fromStation);
+    const spot = home.stationSpot(fromStation);
     if (!walkTo(helper, spot.x, spot.z)) return false;
     helper.carryType = type;
     helper.state = 'toSource';
@@ -227,26 +212,18 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
 
   function placeNearPlayer(helper) {
     const player = getPlayer();
-    const underground = isUnderground();
-    const space = underground ? burrow.space : navigation;
-    const spot = space.nearestWalkable(player.x - 1.4, player.z - 1.2, 6) || { x: player.x, z: player.z };
-    Object.assign(helper, { x: spot.x, z: spot.z, inside: underground, path: [], pathIndex: 0, exitPoint: null });
+    const spot = navigation.nearestWalkable(player.x - 1.4, player.z - 1.2, 6) || { x: player.x, z: player.z };
+    Object.assign(helper, { x: spot.x, z: spot.z, path: [], pathIndex: 0 });
   }
 
   function startFollowing(helper) {
-    if (isUnderground()) {
-      helper.inside = true;
-      helper.path = [];
-      helper.pathIndex = 0;
-    } else if (helper.inside) stepOutside(helper);
     helper.state = 'following';
     helper.repathTimer = 0;
   }
 
   function stopFollowing(helper, fleeing) {
     helper.fightTargetId = null;
-    if (helper.inside) returnToNest(helper);
-    else headHome(helper, fleeing);
+    headHome(helper, fleeing);
   }
 
   function updateFollow(helper, deltaTime, time) {
@@ -255,20 +232,19 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       stopFollowing(helper, false);
       return;
     }
-    if (helper.inside !== isUnderground()) placeNearPlayer(helper);
     const target = player.combatTarget && enemies.alive(player.combatTarget) && Math.hypot(player.combatTarget.x - helper.x, player.combatTarget.z - helper.z) < ASSIST_RANGE ? player.combatTarget : null;
-    const threat = helper.inside ? null : threatNear(helper);
+    const threat = threatNear(helper);
     if (threat && threat.distance < DANGER_DISTANCE && inDanger(helper, threat.enemy)) {
       onLog('helperCombat', `${nameOf(helper)} stops following and flees from the ${threat.enemy.definition.label.toLowerCase()}`);
       stopFollowing(helper, true);
       return;
     }
-    if (target && !helper.inside) {
+    if (target) {
       helper.fightTargetId = target.id;
       const distance = Math.hypot(target.x - helper.x, target.z - helper.z);
       const reach = target.definition.radius + FIGHT_REACH;
       helper.heading = Math.atan2(target.x - helper.x, target.z - helper.z);
-      if (distance > reach) {
+      if (distance > reach + REACH_TOLERANCE) {
         const stride = Math.min(distance - reach, FLEE_SPEED * helperStats(helper).speedFactor * deltaTime);
         const nextX = helper.x + ((target.x - helper.x) / distance) * stride;
         const nextZ = helper.z + ((target.z - helper.z) / distance) * stride;
@@ -288,7 +264,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     }
     helper.fightTargetId = null;
     const distance = Math.hypot(player.x - helper.x, player.z - helper.z);
-    if (!helper.inside && distance > FOLLOW_CATCH_UP_DISTANCE) {
+    if (distance > FOLLOW_CATCH_UP_DISTANCE) {
       placeNearPlayer(helper);
       return;
     }
@@ -300,8 +276,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     helper.repathTimer = (helper.repathTimer || 0) - deltaTime;
     if (helper.repathTimer <= 0 || helper.pathIndex >= helper.path.length) {
       helper.repathTimer = FOLLOW_REPATH_SECONDS;
-      const space = helper.inside ? burrow.space : navigation;
-      helper.path = space.findPath(helper.x, helper.z, player.x, player.z);
+      helper.path = navigation.findPath(helper.x, helper.z, player.x, player.z);
       helper.pathIndex = 0;
     }
     step(helper, deltaTime, distance > FOLLOW_DISTANCE * 3 ? FLEE_SPEED : WALK_SPEED);
@@ -333,9 +308,8 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       if (!startCarry(helper)) helper.restTimer = IDLE_RETRY_SECONDS;
       return;
     }
-    const point = homePoint(helper);
-    if (!point) return;
-    const origin = point.surface;
+    const origin = nestSpot(helper);
+    if (!origin) return;
     const candidates = resources.nodes.filter((node) => node.type === job && !node.gathered && !node.reservedBy);
     candidates.sort((first, second) => Math.hypot(first.x - origin.x, first.z - origin.z) - Math.hypot(second.x - origin.x, second.z - origin.z));
     stepOutside(helper);
@@ -365,7 +339,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   function headHome(helper, fleeing) {
     release(helper);
     helper.state = fleeing ? 'fleeing' : 'returning';
-    const target = (helper.exitPoint || homePoint(helper)).surface;
+    const target = nestSpot(helper) || { x: helper.x, z: helper.z };
     if (!walkTo(helper, target.x, target.z)) {
       helper.path = [{ x: target.x, z: target.z }];
       helper.pathIndex = 0;
@@ -373,7 +347,6 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   }
 
   function arriveHome(helper) {
-    helper.exitPoint = null;
     placeAtNest(helper);
     if (helper.carrying) {
       onDeposit(depositStationOf(helper), helper.carrying, helper.load || 1);
@@ -420,12 +393,12 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
 
   function knockedOut(helper, enemy) {
     release(helper);
-    Object.assign(helper, { job: null, carryOrder: null, carrying: null, load: 0, health: helperMaxHealth(helper), state: 'resting', restTimer: REST_SECONDS, exitPoint: null, fightTargetId: null });
+    Object.assign(helper, { job: null, carryOrder: null, carrying: null, load: 0, health: helperMaxHealth(helper), state: 'resting', restTimer: REST_SECONDS, fightTargetId: null });
     placeAtNest(helper);
     onLost(helper, enemy);
   }
 
-  function updateInside(helper, deltaTime) {
+  function updateYardTrip(helper, deltaTime) {
     if (helper.state === 'toProcess') {
       if (!step(helper, deltaTime, WALK_SPEED)) return;
       const station = stationById(helper.processStationId);
@@ -447,7 +420,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       }
       Object.assign(helper, { carrying: recipe.output, load: collected });
       const target = depositStationOf(helper);
-      const spot = target && burrow.stationSpot(target);
+      const spot = target && home.stationSpot(target);
       if (spot && walkTo(helper, spot.x, spot.z)) helper.state = 'toTarget';
       else returnToNest(helper);
       return;
@@ -465,7 +438,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       helper.load = Math.min(CARRY_LOAD, available);
       source.inventory[helper.carryType] -= helper.load;
       helper.carrying = helper.carryType;
-      const spot = burrow.stationSpot(toStation);
+      const spot = home.stationSpot(toStation);
       walkTo(helper, spot.x, spot.z);
       helper.state = 'toTarget';
     } else if (helper.state === 'toTarget') {
@@ -479,16 +452,13 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     } else if (helper.state === 'toNest') {
       if (!step(helper, deltaTime, WALK_SPEED)) return;
       const spot = nestSpot(helper);
-      if (!spot || Math.hypot(spot.x - helper.x, spot.z - helper.z) < NEST_REACH + 1.5 || helper.pathIndex >= helper.path.length) {
-        helper.state = 'resting';
-        helper.restTimer = REST_SECONDS;
-      }
+      if (!spot || Math.hypot(spot.x - helper.x, spot.z - helper.z) < NEST_REACH + 1.5 || helper.pathIndex >= helper.path.length) arriveHome(helper);
     }
   }
 
   function returnToNest(helper) {
     const spot = nestSpot(helper);
-    if (spot && walkTo(helper, spot.x, spot.z + 1.2)) helper.state = 'toNest';
+    if (spot && walkTo(helper, spot.x, spot.z)) helper.state = 'toNest';
     else {
       placeAtNest(helper);
       helper.state = 'resting';
@@ -528,7 +498,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     }
     const reach = enemy.definition.radius + FIGHT_REACH;
     helper.heading = Math.atan2(enemy.x - helper.x, enemy.z - helper.z);
-    if (distance > reach) {
+    if (distance > reach + REACH_TOLERANCE) {
       const stride = Math.min(distance - reach, WALK_SPEED * helperStats(helper).speedFactor * deltaTime);
       const nextX = helper.x + ((enemy.x - helper.x) / distance) * stride;
       const nextZ = helper.z + ((enemy.z - helper.z) / distance) * stride;
@@ -572,7 +542,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       return;
     }
     helper.mealIn = (helper.mealIn ?? HELPER_MEAL_SECONDS) - deltaTime;
-    if (helper.mealIn > 0 || !(helper.state === 'resting' || helper.inside)) return;
+    if (helper.mealIn > 0 || helper.state !== 'resting') return;
     const wasHungry = helper.hungry;
     helper.hungry = !feedHelper(helper);
     helper.mealIn = helper.hungry ? MEAL_RETRY_SECONDS : HELPER_MEAL_SECONDS;
@@ -583,7 +553,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     helper.moving = false;
     updateMeals(helper, deltaTime);
     const regenFactor = time < (helper.wellFedUntil || 0) ? WELL_FED_REGEN_FACTOR : 1;
-    if (helper.state === 'resting' || helper.inside) helper.health = Math.min(helperMaxHealth(helper), helper.health + HELPER_REGEN_PER_SECOND * regenFactor * deltaTime);
+    if (helper.state === 'resting') helper.health = Math.min(helperMaxHealth(helper), helper.health + HELPER_REGEN_PER_SECOND * regenFactor * deltaTime);
     useItemsIfNeeded(helper, time);
     if (helper.state === 'resting') {
       helper.restTimer -= deltaTime;
@@ -593,14 +563,6 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
         helper.load = 0;
       }
       if (helper.restTimer <= 0) leaveNest(helper);
-      return;
-    }
-    if (helper.inside && helper.state === 'following') {
-      updateFollow(helper, deltaTime, time);
-      return;
-    }
-    if (helper.inside) {
-      updateInside(helper, deltaTime);
       return;
     }
     const threat = threatNear(helper);
@@ -639,7 +601,8 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
         headHome(helper, true);
       }
     }
-    if (helper.state === 'toRack') {
+    if (YARD_TRIP_STATES.has(helper.state)) updateYardTrip(helper, deltaTime);
+    else if (helper.state === 'toRack') {
       step(helper, deltaTime, WALK_SPEED);
       if (!rack.exists || Math.hypot(rack.state.x - helper.x, rack.state.z - helper.z) <= RACK_REACH || helper.pathIndex >= helper.path.length) {
         if (rack.exists && RACK_INPUTS.includes(helper.carrying) && rack.load()) {
@@ -682,14 +645,13 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       }
     } else if (helper.state === 'returning' || helper.state === 'fleeing') {
       step(helper, deltaTime, helper.state === 'fleeing' ? FLEE_SPEED : WALK_SPEED);
-      const target = (helper.exitPoint || homePoint(helper)).surface;
-      if (Math.hypot(target.x - helper.x, target.z - helper.z) <= ENTRANCE_REACH + 0.6 || helper.pathIndex >= helper.path.length) arriveHome(helper);
+      const target = nestSpot(helper);
+      if (!target || Math.hypot(target.x - helper.x, target.z - helper.z) <= NEST_REACH + 1.5 || helper.pathIndex >= helper.path.length) arriveHome(helper);
     }
     helper.y = world.heightAt(helper.x, helper.z);
   }
 
   function update(deltaTime, time = 0) {
-    if (!burrow.exists) return;
     for (const helper of list) {
       if (!nestOf(helper)) continue;
       updateHelper(helper, deltaTime, time);
@@ -698,7 +660,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
 
   const strandedVisible = () => strandedSpots.filter((spot) => !rescued.has(spot.id));
 
-  function drawCrab(entry, { x, y, z, heading, speed, inside, gear, deltaTime }) {
+  function drawCrab(entry, { x, y, z, heading, speed, gear, deltaTime }) {
     const shellKind = gear && gear.shell ? gear.shell.kind : null;
     const clawKind = gear && gear.claws ? gear.claws.kind : null;
     const gearKey = `${shellKind}|${clawKind}`;
@@ -711,10 +673,6 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     if (!viewFrustum.intersectsSphere(cullSphere)) {
       entry.crab.root.visible = false;
       return;
-    }
-    if (entry.inside !== inside) {
-      entry.crab.root.traverse((child) => child.layers.set(inside ? BURROW_LAYER : 0));
-      entry.inside = inside;
     }
     entry.crab.root.visible = true;
     entry.crab.update(deltaTime, { x, y, z, heading, speed, working: false, groundNormal: FLAT_GROUND });
@@ -737,10 +695,10 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       helper.hurtAnimPending = false;
       const speed = helper.moving ? (helper.state === 'fleeing' ? FLEE_SPEED : WALK_SPEED) * helperStats(helper).speedFactor : 0;
       const restingHeading = index * 2.1 + Math.sin(time * 0.3 + index) * 0.3;
-      const heading = helper.inside && helper.state === 'resting' ? restingHeading : helper.heading || 0;
-      drawCrab(entry, { x: helper.x, y: helper.inside ? BURROW_ORIGIN.y : helper.y, z: helper.z, heading, speed, inside: helper.inside, gear: helper.gear, deltaTime });
+      const heading = helper.state === 'resting' ? restingHeading : helper.heading || 0;
+      drawCrab(entry, { x: helper.x, y: helper.y, z: helper.z, heading, speed, gear: helper.gear, deltaTime });
       if (helper.carrying) {
-        transform.position.set(helper.x, (helper.inside ? BURROW_ORIGIN.y : helper.y) + 1.45, helper.z);
+        transform.position.set(helper.x, helper.y + 1.45, helper.z);
         transform.rotation.set(0, 0, 0);
         transform.scale.setScalar(1);
         transform.updateMatrix();
@@ -754,7 +712,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
       const entry = crabFor(key, index + 1);
       drawn.add(key);
       const wiggle = Math.sin(time * STRANDED_BOB_SPEED + index * 1.7);
-      drawCrab(entry, { x: spot.x, y: world.heightAt(spot.x, spot.z), z: spot.z, heading: spot.heading + wiggle * 0.25, speed: STRANDED_STRUGGLE_SPEED, inside: false, gear: null, deltaTime });
+      drawCrab(entry, { x: spot.x, y: world.heightAt(spot.x, spot.z), z: spot.z, heading: spot.heading + wiggle * 0.25, speed: STRANDED_STRUGGLE_SPEED, gear: null, deltaTime });
       const pulse = 1 + 0.12 * Math.sin(time * 3 + index);
       transform.position.set(spot.x, world.heightAt(spot.x, spot.z) + 0.1, spot.z);
       transform.rotation.set(0, 0, 0);
@@ -783,7 +741,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
   }
 
   function freeNest() {
-    return burrow.state.stations.find((station) => station.kind === 'helperNest' && list.filter((helper) => helper.nestId === station.id).length < NEST_CAPACITY) || null;
+    return home.state.stations.find((station) => station.kind === 'helperNest' && list.filter((helper) => helper.nestId === station.id).length < NEST_CAPACITY) || null;
   }
 
   function rescue(spot) {
@@ -792,7 +750,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     if (!nest) return null;
     rescued.add(spot.id);
     const id = nextId++;
-    const helper = { id, helperId: id, spotId: spot.id, nestId: nest.id, job: null, carryOrder: null, gear: { shell: null, claws: null }, level: 1, experience: 0, bag: emptyBag(), itemUse: 'both', state: 'resting', inside: true, x: 0, z: 0, y: 0, heading: 0, path: [], pathIndex: 0, restTimer: 1.5, carrying: null, load: 0, health: HELPER_HEALTH, targetId: null };
+    const helper = { id, helperId: id, spotId: spot.id, nestId: nest.id, job: null, carryOrder: null, gear: { shell: null, claws: null }, level: 1, experience: 0, bag: emptyBag(), itemUse: 'both', state: 'resting', x: 0, z: 0, y: 0, heading: 0, path: [], pathIndex: 0, restTimer: 1.5, carrying: null, load: 0, health: HELPER_HEALTH, targetId: null };
     list.push(helper);
     placeAtNest(helper);
     return helper;
@@ -862,7 +820,7 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     const maxHealth = helperMaxHealth(helper);
     const selfShare = helper.health / maxHealth;
     const vitals = playerVitals();
-    const playerInReach = vitals && vitals.alive && vitals.inside === helper.inside && Math.hypot(vitals.x - helper.x, vitals.z - helper.z) <= ITEM_USE_REACH;
+    const playerInReach = vitals && vitals.alive && Math.hypot(vitals.x - helper.x, vitals.z - helper.z) <= ITEM_USE_REACH;
     const playerShare = playerInReach ? vitals.health / vitals.maxHealth : 1;
     const wantsSelf = (mode === 'self' || mode === 'both') && selfShare < ITEM_USE_HEALTH_SHARE;
     const wantsPlayer = (mode === 'you' || mode === 'both') && playerInReach && playerShare < ITEM_USE_HEALTH_SHARE;
@@ -911,8 +869,8 @@ export function createHelpers(scene, { world, navigation, resources, enemies, qu
     if (helper.job === 'follow' && job !== 'follow' && helper.state === 'following') stopFollowing(helper, false);
     helper.job = job || null;
     helper.carryOrder = job === 'carry' ? carryOrder : null;
-    if (!helper.inside && (helper.state === 'outbound' || helper.state === 'gathering')) headHome(helper, false);
-    if (helper.inside && helper.state !== 'resting') returnToNest(helper);
+    if (helper.state === 'outbound' || helper.state === 'gathering') headHome(helper, false);
+    if (YARD_TRIP_STATES.has(helper.state)) returnToNest(helper);
     if (helper.state === 'resting') helper.restTimer = Math.min(helper.restTimer, 1);
     return true;
   }

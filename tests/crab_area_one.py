@@ -74,7 +74,7 @@ with sync_playwright() as playwright:
     old.wait_for_function('!!window.__debug', timeout=180000)
     migrated = old.evaluate(MIGRATED)
     out.update(migrated)
-    out['version'] = migrated['version'] == 7
+    out['version'] = migrated['version'] == 8
     print(json.dumps(out, indent=1))
     ok = all(out.values()) and not errors
     print('errors', errors)

@@ -103,7 +103,7 @@ function buildLogGeometry(log) {
     colors[index * 3] = color.r * groundShade;
     colors[index * 3 + 1] = color.g * groundShade;
     colors[index * 3 + 2] = color.b * groundShade;
-    positions.setXYZ(index, log.x + cos * localAlong - sin * localSide, log.y + log.radius * 0.62 + localUp, log.z + sin * localAlong + cos * localSide);
+    positions.setXYZ(index, log.x + cos * localAlong - sin * localSide, log.y + log.radius * 0.62 + localUp + (along + 0.5) * (log.rise || 0), log.z + sin * localAlong + cos * localSide);
   }
   geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
   geometry.computeVertexNormals();

@@ -89,6 +89,13 @@ export const BOULDERS = [
   { x: 152, z: 30, radius: 6.8, squash: 0.68, seed: 30 },
 ];
 
+export const HOME_YARD = { x: 20, z: -30, radius: 13, floor: 1.55, blend: 9 };
+export const SHELTER = {
+  boulder: { x: 8.5, z: -29, radius: 4.3, squash: 0.88, seed: 42 },
+  log: { lowX: 18, lowZ: -31.5, highX: 11.2, highZ: -29.4, radius: 0.8, seed: 43 },
+  wake: { x: 18.5, z: -27.5 },
+};
+
 export const DRIFT_LOGS = [
   { x: 28, z: -58, length: 44, radius: 3.1, heading: 0.32, seed: 5 },
   { x: -66, z: -22, length: 28, radius: 2.2, heading: -0.9, seed: 9 },

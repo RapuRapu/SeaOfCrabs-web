@@ -10,8 +10,7 @@ FLOW = r'''
   d.setPaused(false);
   Object.assign(d.save.inventory, { shellBits: 5, driftwood: 7, seaLettuce: 5 });
   d.buildWorkshop();
-  const cell = d.burrow.freeCells().find((c) => !(c.column === 6 && c.row === 5));
-  d.buildStation('helperNest', cell.column, cell.row);
+  d.buildAtDefaultSpot('helperNest');
   const helper = d.rescueHelperAt(d.helpers.strandedVisible()[0]);
   for (const enemy of d.enemies.list) Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 });
   Object.assign(d.save.inventory, { kelpPoultice: 60, driedKelp: 3 });
@@ -35,7 +34,7 @@ FLOW = r'''
     const helperMax = d.helperInfo ? d.helperInfo(helper).maxHealth : 10;
     helper.health = helperMax * selfShare;
     d.progression.state.health = d.progression.maxHealth() * playerShare;
-    Object.assign(helper, { inside: d.isUnderground(), x: d.player.x + (near ? 2 : 30), z: d.player.z });
+    Object.assign(helper, { x: d.player.x + (near ? 2 : 30), z: d.player.z });
     return d.helpers.useItemsIfNeeded(helper, 1000);
   };
   const result = (value) => value ? `${value.type}>${value.target}` : 'none';

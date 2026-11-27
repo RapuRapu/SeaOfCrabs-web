@@ -32,54 +32,52 @@ FLOW = r'''
   d.workbenchPanel.close();
 
   Object.assign(d.save.inventory, { driftwood: 20, shellBits: 40 });
-  d.enterBurrow();
+  d.goHome();
   const before = { ...d.save.inventory };
-  d.buildStation('storage', 4, 5);
-  const storage = d.burrow.stationOf('storage');
+  d.buildAtDefaultSpot('storage');
+  const storage = d.home.stationOf('storage');
   d.storage.inventory.shellBits = 2;
   d.storagePanel.open();
   q('#hud .storage-panel [data-structure-dismantle]').click();
   q('#hud .storage-panel [data-structure-dismantle]').click();
-  out.storageNotEmptyKept = d.burrow.hasStation('storage');
+  out.storageNotEmptyKept = d.home.hasStation('storage');
   d.storage.inventory.shellBits = 0;
   d.storagePanel.render();
   q('#hud .storage-panel [data-structure-move]').click();
   out.moveMode = Boolean(d.placement.moving) && !d.storagePanel.isOpen;
-  const target = d.burrow.freeCells().find((cell) => !(cell.column === 4 && cell.row === 5));
-  out.moved = d.moveStationTo(target.column, target.row);
-  d.cancelPlacement && d.cancelPlacement();
-  out.movedSaved = d.save.burrow.stations.find((s) => s.kind === 'storage');
+  const target = d.home.defaultSpot('grinder');
+  out.moved = d.moveStructureTo(target.x, target.z);
+  d.cancelPlacement();
+  out.movedSaved = d.save.home.stations.find((s) => s.kind === 'storage');
   out.movedTarget = target;
   d.storagePanel.open();
   const dismantle = q('#hud .storage-panel [data-structure-dismantle]');
   dismantle.click();
   out.armedText = dismantle.textContent;
-  out.afterOneTap = d.burrow.hasStation('storage');
+  out.afterOneTap = d.home.hasStation('storage');
   d.storagePanel.render();
   out.armedSurvivesRender = q('#hud .storage-panel [data-structure-dismantle]').classList.contains('armed');
   q('#hud .storage-panel [data-structure-dismantle]').click();
-  out.storageGone = !d.burrow.hasStation('storage');
+  out.storageGone = !d.home.hasStation('storage');
   out.storageRefund = d.save.inventory.driftwood - (before.driftwood - 4);
 
   const wbBefore = { ...d.save.inventory };
-  out.workshopGone = d.dismantleStructure('workshop') && !d.burrow.hasStation('workshop') && !d.workshop.built;
+  out.workshopGone = d.dismantleStructure('workshop') && !d.home.hasStation('workshop') && !d.workshop.built;
   out.workshopRefund = ['shellBits', 'driftwood', 'seaLettuce'].map((t) => (d.save.inventory[t] || 0) - (wbBefore[t] || 0));
 
   Object.assign(d.save.inventory, { driftwood: 10, shellBits: 10, seaLettuce: 6 });
-  d.buildRackStation();
+  d.buildAtDefaultSpot('dryingRack');
   d.rack.load();
   d.rack.state.ready = 2;
   const oldRack = { x: d.rack.state.x, z: d.rack.state.z };
-  const entrance = d.burrow.state.entrance;
-  let movedRack = false;
-  for (let attempt = 0; attempt < 24 && !movedRack; attempt++) {
-    const angle = attempt * 0.9;
-    movedRack = d.moveRackTo(entrance.x + Math.cos(angle) * 5, entrance.z + Math.sin(angle) * 5);
-  }
+  d.startMovingStructure('dryingRack');
+  out.rackFarRejected = !d.moveStructureTo(d.home.yard.x + 40, d.home.yard.z);
+  const rackTarget = d.home.defaultSpot('ropeWalk');
+  const movedRack = d.moveStructureTo(rackTarget.x, rackTarget.z);
+  d.cancelPlacement();
   out.rackMoved = movedRack && (d.rack.state.x !== oldRack.x || d.rack.state.z !== oldRack.z);
   out.oldRackUnblocked = d.world.isWalkable(oldRack.x, oldRack.z) || Math.hypot(oldRack.x - d.rack.state.x, oldRack.z - d.rack.state.z) < 2.6;
   out.newRackBlocked = !d.world.isWalkable(d.rack.state.x, d.rack.state.z);
-  out.rackFarRejected = !d.moveRackTo(entrance.x + 40, entrance.z);
   const rackBefore = { ...d.save.inventory };
   const rackSpot = { x: d.rack.state.x, z: d.rack.state.z };
   out.rackGone = d.dismantleStructure('dryingRack') && !d.rack.exists;
@@ -133,7 +131,7 @@ with sync_playwright() as playwright:
         'materialRevealsRecipe': 'shell:coral' in flow['craftWithCoral'] and 'claws:coralTipped' in flow['craftWithCoral'] and 'shell:whelk' in flow['craftWithCoral'],
         'discoveryRemembered': 'shell:coral' in flow['craftAfterSpendingCoral'],
         'storageMustBeEmpty': flow['storageNotEmptyKept'],
-        'storageMoves': flow['moveMode'] and flow['moved'] and flow['movedSaved']['column'] == flow['movedTarget']['column'] and flow['movedSaved']['row'] == flow['movedTarget']['row'],
+        'storageMoves': flow['moveMode'] and flow['moved'] and abs(flow['movedSaved']['x'] - flow['movedTarget']['x']) < 0.01 and abs(flow['movedSaved']['z'] - flow['movedTarget']['z']) < 0.01,
         'dismantleNeedsTwoTaps': flow['armedSurvivesRender'] and flow['afterOneTap'] and 'again' in flow['armedText'] and flow['storageGone'] and flow['storageRefund'] == 4,
         'workshopDismantle': flow['workshopGone'] and flow['workshopRefund'] == [5, 3, 3],
         'rackMoves': flow['rackMoved'] and flow['oldRackUnblocked'] and flow['newRackBlocked'] and flow['rackFarRejected'],
@@ -144,7 +142,7 @@ with sync_playwright() as playwright:
     }
     page.reload()
     page.wait_for_function('!!window.__debug', timeout=180000)
-    reloaded = page.evaluate("() => { const d = window.__debug; return { stations: d.save.burrow.stations.length, rack: d.rack.exists, discovered: d.save.discovered.includes('coral') }; }")
+    reloaded = page.evaluate("() => { const d = window.__debug; return { stations: d.save.home.stations.length, rack: d.rack.exists, discovered: d.save.discovered.includes('coral') }; }")
     print(json.dumps(reloaded))
     checks['saved'] = reloaded == {'stations': 0, 'rack': False, 'discovered': True}
     browser.close()

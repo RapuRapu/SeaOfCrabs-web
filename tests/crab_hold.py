@@ -10,7 +10,7 @@ window.__hold = (() => {
   const d = window.__debug;
   const step = (seconds, until) => { let t = 0; for (; t < seconds; t += 1/60) { d.simulate(1/60); if (until && until()) break; } return t; };
   const silenceOthers = (keep) => { for (const enemy of d.enemies.list) if (!keep.includes(enemy)) Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 }); };
-  const place = (x, z) => { if (d.isUnderground()) d.exitBurrow(); const spot = d.navigation.nearestWalkable(x, z, 20); Object.assign(d.player, { x: spot.x, z: spot.z, path: [], pathIndex: 0, combatTarget: null, gatherTarget: null, speed: 0, inkedUntil: 0 }); return spot; };
+  const place = (x, z) => { const spot = d.navigation.nearestWalkable(x, z, 20); Object.assign(d.player, { x: spot.x, z: spot.z, path: [], pathIndex: 0, combatTarget: null, gatherTarget: null, speed: 0, inkedUntil: 0 }); return spot; };
   const equip = (shell, shellInvestment, claws, clawInvestment) => d.equipBuild(shell, claws, shellInvestment > 0 || clawInvestment > 0);
   function setup(kind, count, level, shell, shellInvestment, claws, clawInvestment, fed) {
     d.progression.setLevel(level);
@@ -100,7 +100,7 @@ with sync_playwright() as playwright:
       d.buildWorkshop();
       d.save.inventory.shellBits = 3;
       d.craftItem('shell', 'snail');
-      if (d.isUnderground()) d.exitBurrow();
+
       Object.assign(d.save, { reefFound: true, reefGearCrafted: true, campFound: true });
       d.save.worldTime = 300;
       Object.assign(d.save.inventory, { scrap: 4, cloth: 2, pearls: 2 });
@@ -170,7 +170,7 @@ with sync_playwright() as playwright:
 
     performance = {'start': frame_numbers(context, 1), 'holdOverview': frame_numbers(context, 84), 'inHold': frame_numbers(context, 85)}
     print('performance', json.dumps(performance), flush=True)
-    checks['performance'] = performance['start']['calls'] <= 90 and performance['start']['triangles'] < 1215000 and performance['inHold']['calls'] <= 106
+    checks['performance'] = performance['start']['calls'] <= 90 and performance['start']['triangles'] < 1250000 and performance['inHold']['calls'] <= 106
     checks['noConsoleErrors'] = not errors
     if errors: print(errors[:5])
     browser.close()

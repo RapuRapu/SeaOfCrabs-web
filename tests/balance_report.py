@@ -31,14 +31,13 @@ window.__balance = (() => {
     if (helper) return helper;
     Object.assign(d.save.inventory, { shellBits: 5, driftwood: 7, seaLettuce: 5 });
     if (!d.burrow.exists) d.buildWorkshop();
-    const cell = d.burrow.freeCells().find((c) => !(c.column === 6 && c.row === 5));
-    d.buildStation('helperNest', cell.column, cell.row);
+    d.buildAtDefaultSpot('helperNest');
     for (const enemy of d.enemies.list) if (enemy.kind === 'gull') Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 });
     helper = d.rescueHelperAt(d.helpers.strandedVisible()[0]);
     return helper;
   }
   function fight(kind, level, shell, claws, invested, withHelper, fed = false, dodge = false) {
-    if (d.isUnderground()) d.exitBurrow();
+
     for (const enemy of d.enemies.list) Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 });
     while (d.remains.list.length) d.remains.remove(d.remains.list[0]);
     d.progression.setLevel(level);

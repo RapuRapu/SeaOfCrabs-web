@@ -9,7 +9,7 @@ SETUP = r'''
   d.setPaused(true);
   Object.assign(d.save.inventory, { shellBits: 5, driftwood: 3, seaLettuce: 3 });
   d.buildWorkshop();
-  return d.burrow.hasStation('workshop');
+  return d.home.hasStation('workshop');
 }
 '''
 
@@ -69,11 +69,11 @@ LOGIC = r'''
   out.moltsAtLevelOne = d.progression.moltsAvailable();
   d.progression.setLevel(3);
   out.moltsAtLevelThree = d.progression.moltsAvailable();
-  if (d.isUnderground()) d.exitBurrow();
+
+  d.leaveHome();
   out.surfaceMoltRefused = d.startMolt('crusher') === false;
-  d.enterBurrow();
+  d.goHome();
   out.moltStarted = d.startMolt('crusher');
-  out.moltingBlocksTravel = d.travelOption() === null;
   const attackBefore = d.playerStats().attack;
   step(30);
   out.stillMoltingAt30 = d.isMolting();
@@ -160,7 +160,7 @@ with sync_playwright() as playwright:
         'spikesReplacePlate': logic['replaceRefusedSame'] and logic['spikesThorns'] == 3 and logic['spikesDefense'] == 9,
         'bindings': logic['masterworkClawAttack'] == 9 and logic['wireAttack'] == 10 and abs(logic['threadInterval'] - 0.9) < 1e-9 and logic['kelpHeal'] == 1,
         'moltSchedule': logic['moltsAtLevelOne'] == 0 and logic['moltsAtLevelThree'] == 1 and logic['moltsAtTen'] == 0 and logic['moltsAtTwelve'] == 1 and logic['moltsAt23'] == 7 and logic['moltsAtCap'] == 8 and logic['levelCap'] == 50,
-        'moltInBurrowOnly': logic['surfaceMoltRefused'] and logic['moltStarted'] and logic['moltingBlocksTravel'] and logic['stillMoltingAt30'],
+        'moltAtHomeOnly': logic['surfaceMoltRefused'] and logic['moltStarted'] and logic['stillMoltingAt30'],
         'moltGrowsAndSoftens': logic['molts'] == ['crusher'] and logic['softAfterMolt'] and logic['softDefense'] == 5 and logic['attackGrowth'] > 1 and logic['hardAgain'],
         'clawSkill': 9.5 < logic['skillAfter187'] < 10.5 and logic['skillCap'] == 20 and logic['skillAfterDeath'] == 9.5,
         'statusShowsGrowth': bool(logic['backpackGrowth']) and 'Claw skill9.5 / 20' in logic['backpackGrowth'],
@@ -170,7 +170,7 @@ with sync_playwright() as playwright:
     page.wait_for_function('!!window.__debug', timeout=180000)
     reloaded = page.evaluate('''() => { const d = window.__debug; const shell = d.gear.wornShell(); const claws = d.gear.wornClaws(); return { tools: d.gear.state.toolTier, shell: shell && `${shell.kind}:${shell.quality}:${shell.reinforcement}`, claws: `${claws.kind}:${claws.quality}:${claws.binding}`, skill: d.progression.state.clawSkill, molts: d.progression.state.molts.length, version: d.save.version }; }''')
     print('reloaded', json.dumps(reloaded), flush=True)
-    checks['saved'] = reloaded == {'tools': 2, 'shell': 'turban:masterwork:boneSpikes', 'claws': 'shellEdged:masterwork:kelp', 'skill': 9.5, 'molts': 3, 'version': 7}
+    checks['saved'] = reloaded == {'tools': 2, 'shell': 'turban:masterwork:boneSpikes', 'claws': 'shellEdged:masterwork:kelp', 'skill': 9.5, 'molts': 3, 'version': 8}
     context.close()
 
     old = browser.new_context(viewport={'width': 915, 'height': 412})
@@ -217,7 +217,7 @@ with sync_playwright() as playwright:
       const d = window.__debug;
       d.workbenchPanel.close();
       d.progression.setLevel(3);
-      d.enterBurrow();
+      d.goHome();
       d.refreshHud && d.refreshHud(null);
       return true;
     }''')

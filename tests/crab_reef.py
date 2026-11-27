@@ -58,7 +58,7 @@ async () => {
   d.buildWorkshop();
   d.save.inventory.shellBits = 3;
   d.craftItem('shell', 'snail');
-  if (d.isUnderground()) d.exitBurrow();
+
   const nearestCoral = d.resources.nodes.filter((node) => node.type === 'coral' && !node.gathered).sort((a, b) => Math.hypot(a.x - d.player.x, a.z - d.player.z) - Math.hypot(b.x - d.player.x, b.z - d.player.z))[0];
   d.setDestination(nearestCoral.x, nearestCoral.z, nearestCoral);
   out.walksToCoral = d.player.path.length > 0 && d.player.gatherTarget && d.player.gatherTarget.type === 'coral';
@@ -126,7 +126,7 @@ with sync_playwright() as playwright:
     checks['saved'] = reloaded == {'reefFound': True, 'coral': 1, 'seaGlass': 1}
     performance = {'start': frame_numbers(context, 1), 'onReef': frame_numbers(context, 59), 'reefEdge': frame_numbers(context, 64)}
     print(json.dumps(performance))
-    checks['performance'] = performance['start']['calls'] <= 90 and performance['start']['triangles'] < 1215000 and all(performance[view]['calls'] <= 104 and performance[view]['triangles'] < 1550000 for view in ('onReef', 'reefEdge'))
+    checks['performance'] = performance['start']['calls'] <= 90 and performance['start']['triangles'] < 1250000 and all(performance[view]['calls'] <= 104 and performance[view]['triangles'] < 1550000 for view in ('onReef', 'reefEdge'))
     checks['noConsoleErrors'] = not errors
     if errors: print(errors[:5])
     browser.close()

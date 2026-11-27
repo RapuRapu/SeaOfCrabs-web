@@ -11,9 +11,8 @@ FLOW = r'''
   for (const enemy of d.enemies.list) Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 });
   Object.assign(d.save.inventory, { shellBits: 30, driftwood: 40, seaLettuce: 20, pearls: 3, pebbles: 20, clay: 20, kelp: 6 });
   d.buildWorkshop();
-  for (let pass = 0; pass < 3; pass++) for (let column = 1; column <= 11; column++) for (let row = 1; row <= 11; row++) if (d.burrow.canDig(column, row)) d.burrow.finishDig(column, row);
-  const place = (kind) => { const cell = d.burrow.freeCells().find((candidate) => candidate.column % 2 === 0 && candidate.row % 2 === 0); return d.buildStation(kind, cell.column, cell.row) && d.burrow.state.stations.find((s) => s.kind === kind && s.column === cell.column && s.row === cell.row); };
-  const station = (kind) => d.burrow.state.stations.find((s) => s.kind === kind);
+  const place = (kind) => d.buildAtDefaultSpot(kind) && d.home.state.stations.filter((s) => s.kind === kind).at(-1);
+  const station = (kind) => d.home.state.stations.find((s) => s.kind === kind);
   place('helperNest');
   place('storage');
   place('burrowHeart');
@@ -40,9 +39,9 @@ FLOW = r'''
 
   const storage = station('storage');
   d.addBoardOrder('cord', storage.id, 1);
-  const nest = d.burrow.state.stations.find((s) => s.id === helper.nestId);
+  const nest = d.home.state.stations.find((s) => s.id === helper.nestId);
   nest.box.inventory.kelp = 3;
-  Object.assign(helper, { state: 'resting', inside: true, restTimer: 0 });
+  Object.assign(helper, { state: 'resting', restTimer: 0 });
   for (let time = 0; time < 180 && !(d.boardView()[1] && d.boardView()[1].status === 'Done'); time += 0.25) d.simulate(0.25);
   const view = d.boardView();
   out.ropeOrderDone = view[1] && view[1].status === 'Done';
@@ -53,7 +52,7 @@ FLOW = r'''
   out.removed = d.removeBoardOrder(d.boardOrders()[0].id) && d.boardOrders().length === 1;
 
   d.helpers.setJob(helper.id, 'pebbles');
-  Object.assign(helper, { state: 'resting', inside: true, restTimer: 0 });
+  Object.assign(helper, { state: 'resting', restTimer: 0 });
   const pebblesBefore = nest.box.inventory.pebbles || 0;
   let biggestDrop = 0, last = pebblesBefore;
   for (let time = 0; time < 240 && biggestDrop < 2; time += 0.25) {

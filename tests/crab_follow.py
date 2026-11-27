@@ -11,8 +11,7 @@ FLOW = r'''
   d.setPaused(false);
   Object.assign(d.save.inventory, { shellBits: 5, driftwood: 7, seaLettuce: 5 });
   d.buildWorkshop();
-  const cell = d.burrow.freeCells().find((c) => !(c.column === 6 && c.row === 5));
-  d.buildStation('helperNest', cell.column, cell.row);
+  d.buildAtDefaultSpot('helperNest');
   const buddy = d.rescueHelperAt(d.helpers.strandedVisible()[0]);
   const other = d.rescueHelperAt(d.helpers.strandedVisible()[0]);
   const claws = d.gear.grant('claws', 'shellEdged');
@@ -23,9 +22,9 @@ FLOW = r'''
   out.secondRefused = d.helpers.setJob(other.id, 'follow') === false;
   out.optionHidden = (() => { d.helpersPanel.open(); const options = [...document.querySelectorAll(`#hud .helpers-panel select[data-job="${other.id}"] option`)].map((o) => o.value); d.helpersPanel.close(); return !options.includes('follow'); })();
 
-  if (d.isUnderground()) d.exitBurrow();
-  step(8, () => buddy.state === 'following' && !buddy.inside);
-  out.cameOut = buddy.state === 'following' && !buddy.inside;
+
+  step(8, () => buddy.state === 'following');
+  out.cameOut = buddy.state === 'following';
   const goal = d.navigation.nearestWalkable(d.player.x + 14, d.player.z + 6, 8);
   d.setDestination(goal.x, goal.z);
   step(10);
@@ -52,13 +51,13 @@ FLOW = r'''
   Object.assign(crab, { state: 'dead', respawnTimer: 1e9 });
   d.player.combatTarget = null;
 
-  d.walkToEntrance({ enter: true });
-  step(30, () => d.isUnderground());
+  d.goHome();
+  step(30, () => d.isHome());
   out.fledEarlier = buddy.state === 'resting';
   step(10, () => buddy.state === 'following');
   step(2);
-  out.burrowDebug = { underground: d.isUnderground(), inside: buddy.inside, state: buddy.state, distance: Math.hypot(buddy.x - d.player.x, buddy.z - d.player.z), health: buddy.health };
-  out.inBurrowWithYou = d.isUnderground() && buddy.inside && buddy.state === 'following' && Math.hypot(buddy.x - d.player.x, buddy.z - d.player.z) < 8;
+  out.homeDebug = { home: d.isHome(), state: buddy.state, distance: Math.hypot(buddy.x - d.player.x, buddy.z - d.player.z), health: buddy.health };
+  out.homeWithYou = d.isHome() && buddy.state === 'following' && Math.hypot(buddy.x - d.player.x, buddy.z - d.player.z) < 8;
   out.unfollow = d.helpers.setJob(buddy.id, null) && d.helpers.setJob(other.id, 'follow');
   d.persist();
   return out;
@@ -83,7 +82,7 @@ with sync_playwright() as playwright:
         'followsOnSurface': flow['cameOut'] and flow['followDistance'] <= 6,
         'helpsInFight': flow['helpedInFight'],
         'assistGivesExperience': flow['assistExperience'],
-        'followsIntoBurrow': flow['inBurrowWithYou'],
+        'followsHome': flow['homeWithYou'],
         'canSwitchFollower': flow['unfollow'],
         'noErrors': not errors,
     }

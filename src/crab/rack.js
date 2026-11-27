@@ -11,7 +11,7 @@ export const rackInputIn = (inventory) => RACK_INPUTS.find((type) => (inventory[
 export const RACK_DRY_SECONDS = 60;
 export const RACK_REACH = 2.6;
 export const RACK_BLOCK_RADIUS = 1.3;
-const RACK_DISTANCE_FROM_ENTRANCE = 6.5;
+const RACK_DEFAULT_HEADING = 0.9;
 
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 const POLE = linearColor(0.74, 0.6, 0.42);
@@ -92,19 +92,10 @@ export function createRack(scene, world, quality, labelParent, saved) {
     group.visible = true;
   }
 
-  function build(entrance) {
-    for (let attempt = 0; attempt < 16; attempt++) {
-      const angle = -0.6 + attempt * 0.7;
-      const x = entrance.x + Math.cos(angle) * RACK_DISTANCE_FROM_ENTRANCE;
-      const z = entrance.z + Math.sin(angle) * RACK_DISTANCE_FROM_ENTRANCE;
-      let clear = world.isWalkable(x, z);
-      for (let around = 0; around < 8 && clear; around++) clear = world.isWalkable(x + Math.cos(around) * 1.8, z + Math.sin(around) * 1.8);
-      if (!clear) continue;
-      stateRef.current = { x, z, heading: angle + Math.PI / 2, slots: Array(RACK_SLOTS).fill(null), ready: 0 };
-      place();
-      return stateRef.current;
-    }
-    return null;
+  function buildAt(x, z, heading = RACK_DEFAULT_HEADING) {
+    stateRef.current = { x, z, heading, slots: Array(RACK_SLOTS).fill(null), ready: 0 };
+    place();
+    return stateRef.current;
   }
 
   const stateRef = { current: state };
@@ -212,7 +203,7 @@ export function createRack(scene, world, quality, labelParent, saved) {
     get exists() {
       return Boolean(stateRef.current);
     },
-    build,
+    buildAt,
     moveTo,
     remove,
     freeSlots,

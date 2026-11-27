@@ -1,6 +1,6 @@
 import { CLAWS, canAfford, salvageReturn } from './gear.js';
 import { RESOURCE_TYPES } from './resources.js';
-import { STATION_KINDS } from './burrow.js';
+import { STATION_KINDS } from './stationModels.js';
 import { element } from './workbench.js';
 import { materialEntries, gearEntries, renderSlot, renderDetails, attachSlotGestures, salvageAction, renderStructureActions } from './inventoryView.js';
 import { definitionOf } from './itemInfo.js';
@@ -44,18 +44,12 @@ function costText(cost, inventory) {
   });
 }
 
-export function createBuildPanel(root, { inventory, hasStation, buildProblem = () => null, onChoose, onFill, onClose }) {
+export function createBuildPanel(root, { inventory, hasStation, buildProblem = () => null, onChoose, onClose }) {
   const shell = createPanelShell(root, 'build-panel', 'Build', onClose);
 
   function render() {
     shell.body.replaceChildren();
-    element('div', 'summary', shell.body, 'Pick a station, then tap a glowing spot in your burrow.');
-    const fillRow = element('div', 'item', shell.body);
-    const fillText = element('div', 'item-text', fillRow);
-    element('div', 'item-name', fillText, 'Fill sand');
-    element('div', 'item-ability', fillText, 'Push sand back into a tunnel. Free. Tunnels that keep a structure reachable cannot be filled.');
-    const fillButton = element('button', 'item-action fill-sand', fillRow, 'Fill');
-    fillButton.addEventListener('click', () => onFill());
+    element('div', 'summary', shell.body, 'Pick a station, then tap a spot inside your yard.');
     for (const [kind, definition] of Object.entries(STATION_KINDS)) {
       const built = !definition.multiple && hasStation(kind);
       const row = element('div', 'item', shell.body);
@@ -66,7 +60,7 @@ export function createBuildPanel(root, { inventory, hasStation, buildProblem = (
       for (const [index, part] of costText(definition.cost, inventory()).entries()) element('span', part.includes('have') ? 'cost-item short' : 'cost-item', cost, part).dataset.index = String(index);
       const problem = built ? null : buildProblem(kind);
       if (problem) element('div', 'panel-hint', text, problem);
-      const button = element('button', 'item-action', row, built ? 'Built' : definition.surface ? 'Build' : 'Place');
+      const button = element('button', 'item-action', row, built ? 'Built' : 'Place');
       button.dataset.station = kind;
       button.disabled = built || Boolean(problem) || !canAfford(definition.cost, inventory());
       button.addEventListener('click', () => onChoose(kind));
@@ -542,7 +536,7 @@ export function createBoardPanel(root, { orders, materialOptions, boxOptions, am
     add.dataset.addOrder = '1';
     add.disabled = !draft.material || draft.toId === null;
     add.addEventListener('click', () => onAdd(draft.material, draft.toId, draft.amount));
-    renderStructureActions(shell.body, { label: 'burrow heart', onMove: onMoveStructure, onDismantle: onDismantleStructure });
+    renderStructureActions(shell.body, { label: 'colony heart', onMove: onMoveStructure, onDismantle: onDismantleStructure });
   }
 
   return {

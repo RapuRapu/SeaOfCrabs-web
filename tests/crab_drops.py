@@ -11,7 +11,7 @@ window.__drops = (() => {
   const d = window.__debug;
   const step = (seconds, until) => { let t = 0; for (; t < seconds; t += 1/60) { d.simulate(1/60); if (until && until()) break; } return t; };
   const silenceOthers = (keep) => { for (const enemy of d.enemies.list) if (!keep.includes(enemy) && !enemy.definition.dailyBoss) Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 }); for (const enemy of d.enemies.list) if (!keep.includes(enemy) && enemy.definition.dailyBoss && enemy.state !== 'dead') Object.assign(enemy, { state: 'dead', respawnTimer: 1e9 }); };
-  const place = (x, z) => { if (d.isUnderground()) d.exitBurrow(); const spot = d.navigation.nearestWalkable(x, z, 20); Object.assign(d.player, { x: spot.x, z: spot.z, path: [], pathIndex: 0, combatTarget: null, gatherTarget: null, speed: 0, inkedUntil: 0 }); return spot; };
+  const place = (x, z) => { const spot = d.navigation.nearestWalkable(x, z, 20); Object.assign(d.player, { x: spot.x, z: spot.z, path: [], pathIndex: 0, combatTarget: null, gatherTarget: null, speed: 0, inkedUntil: 0 }); return spot; };
   const equip = (shell, shellInvestment, claws, clawInvestment) => d.equipBuild(shell, claws, shellInvestment > 0 || clawInvestment > 0);
   const arenas = {
     giantLobster: { lair: { x: -250, z: 160 }, stand: { x: -250, z: 153 } },

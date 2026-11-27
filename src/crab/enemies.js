@@ -310,7 +310,8 @@ function createGullModel(scene, quality) {
   return { root, torso, wings, shadow, materials: [material, wingMaterial] };
 }
 
-export function createEnemies({ scene, world, navigation, quality, spawnTable, labelParent, onAttackPlayer, onKilled, onAlert = () => {}, onSound = () => {}, onInk = () => {}, onDodge = () => {}, onWarn = () => {}, bossAwake = () => true, bossReturnText = () => null }) {
+export function createEnemies({ scene, world, navigation, quality, spawnTable, labelParent, onAttackPlayer, onKilled, onAlert = () => {}, onSound = () => {}, onInk = () => {}, onDodge = () => {}, onWarn = () => {}, bossAwake = () => true, bossReturnText = () => null, safeZone = null }) {
+  const insideSafeZone = (x, z, margin = 0) => Boolean(safeZone) && Math.hypot(x - safeZone.x, z - safeZone.z) < safeZone.radius + margin;
   const hopperMaterial = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.45 }), { chromaticCaustics: quality.chromaticCaustics, wetDarkening: 0.6, wetRoughness: 0.1, instanceFlash: true });
   const crabMaterial = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.38 }), { chromaticCaustics: quality.chromaticCaustics, wetDarkening: 0.6, wetRoughness: 0.1, instanceFlash: true });
   const counts = Object.fromEntries(Object.keys(ENEMY_KINDS).map((kind) => [kind, spawnTable.filter((entry) => entry.kind === kind).reduce((sum, entry) => sum + entry.count, 0)]));
@@ -584,8 +585,11 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       return true;
     }
     const stride = Math.min(distance, speed * deltaTime);
-    enemy.x += (offsetX / distance) * stride;
-    enemy.z += (offsetZ / distance) * stride;
+    const nextX = enemy.x + (offsetX / distance) * stride;
+    const nextZ = enemy.z + (offsetZ / distance) * stride;
+    if (insideSafeZone(nextX, nextZ, enemy.definition.radius) && !insideSafeZone(enemy.x, enemy.z, enemy.definition.radius)) return false;
+    enemy.x = nextX;
+    enemy.z = nextZ;
     enemy.moveHeading = Math.atan2(offsetX, offsetZ);
     return true;
   }
@@ -720,7 +724,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     }
     if (enemy.state === 'idle') {
       const awake = time > calmUntil && player.alive;
-      const sees = definition.temperament === 'aggressive' && toPlayer < definition.sightRange && navigation.clearLine(enemy.x, enemy.z, player.x, player.z);
+      const sees = definition.temperament === 'aggressive' && toPlayer < definition.sightRange && !insideSafeZone(player.x, player.z) && navigation.clearLine(enemy.x, enemy.z, player.x, player.z);
       const trespass = definition.temperament === 'aggressive' && enemy.entry.territory && enemy.entry.territory(player.x, player.z);
       const passesDen = lurker && toPlayer < reach;
       if (awake && (sees || trespass || passesDen)) {
@@ -746,7 +750,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       enemy.activity = null;
       const leashed = enemy.entry.stations ? false : lurker ? toPlayer > reach + 3 : Math.hypot(player.x - enemy.anchor.x, player.z - enemy.anchor.z) > LEASH_DISTANCE;
       const leftTerritory = enemy.entry.territory && !enemy.entry.territory(player.x, player.z) && toPlayer > reach + 2 && !enemy.zone;
-      enemy.outOfBoundsSeconds = leashed || leftTerritory ? (enemy.outOfBoundsSeconds || 0) + deltaTime : 0;
+      enemy.outOfBoundsSeconds = leashed || leftTerritory || insideSafeZone(player.x, player.z) ? (enemy.outOfBoundsSeconds || 0) + deltaTime : 0;
       if (!player.alive || enemy.outOfBoundsSeconds > LEASH_GRACE_SECONDS) {
         enemy.outOfBoundsSeconds = 0;
         enemy.zone = null;

@@ -11,8 +11,7 @@ FLOW = r'''
   d.setPaused(false);
   Object.assign(d.save.inventory, { shellBits: 5, driftwood: 7, seaLettuce: 5 });
   d.buildWorkshop();
-  const cell = d.burrow.freeCells().find((c) => !(c.column === 6 && c.row === 5));
-  d.buildStation('helperNest', cell.column, cell.row);
+  d.buildAtDefaultSpot('helperNest');
   const fighter = d.rescueHelperAt(d.helpers.strandedVisible()[0]);
   const coward = d.rescueHelperAt(d.helpers.strandedVisible()[0]);
 
@@ -32,10 +31,10 @@ FLOW = r'''
     enemy.state = 'idle';
     return enemy;
   };
+  for (const node of d.resources.nodes) if (node.type === 'driftwood' && Math.hypot(node.x - d.home.yard.x, node.z - d.home.yard.z) < 30) node.gathered = true;
   const sendOut = (helper) => {
     d.helpers.setJob(helper.id, 'driftwood');
-    step(25, () => !helper.inside && helper.state === 'outbound');
-    step(2);
+    step(40, () => helper.state === 'outbound' && !d.home.isInYard(helper.x, helper.z, -4));
   };
 
   sendOut(fighter);
@@ -44,19 +43,19 @@ FLOW = r'''
   const expBefore = fighter.experience;
   step(20, () => crab.state === 'dying' || crab.state === 'dead');
   out.fighterWon = crab.state === 'dying' || crab.state === 'dead';
-  out.fighterState = { state: fighter.state, inside: fighter.inside, health: fighter.health, crabHealth: crab.health, distance: Math.hypot(crab.x - fighter.x, crab.z - fighter.z) };
+  out.fighterState = { state: fighter.state, health: fighter.health, crabHealth: crab.health, distance: Math.hypot(crab.x - fighter.x, crab.z - fighter.z) };
   out.fighterXp = { level: fighter.level, gained: fighter.level > levelBefore || fighter.experience > expBefore };
   out.fighterCarries = fighter.carrying;
   out.playerXpUntouched = d.progression.state.experience === 0;
-  step(40, () => fighter.inside);
-  const nest = d.burrow.state.stations.find((s) => s.kind === 'helperNest');
+  step(40, () => fighter.state === 'resting');
+  const nest = d.home.state.stations.find((s) => s.kind === 'helperNest');
   out.lootInNest = Object.values(nest.box.inventory).reduce((sum, value) => sum + value, 0);
 
   sendOut(coward);
   const rat = spawnNear(coward, 'rat');
   let fought = false;
   for (let t = 0; t < 6; t += 1/60) { d.simulate(1/60); if (coward.state === 'fighting') fought = true; }
-  out.cowardFled = !fought && (coward.state === 'fleeing' || coward.inside);
+  out.cowardFled = !fought && ['fleeing', 'resting', 'returning'].includes(coward.state);
   out.ratHealthy = rat.health === rat.definition.health;
   Object.assign(rat, { state: 'dead', respawnTimer: 1e9 });
 

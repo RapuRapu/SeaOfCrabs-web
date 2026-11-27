@@ -11,15 +11,17 @@ FLOW = r'''
   d.setPaused(false);
   Object.assign(d.save.inventory, { shellBits: 7, driftwood: 11, seaLettuce: 3 });
   d.buildWorkshop();
-  d.buildStation('storage', 4, 5);
+  d.buildAtDefaultSpot('storage');
   d.save.inventory.seaLettuce = 3;
-  d.enterBurrow();
+  d.goHome();
   document.querySelector('#hud .build-open').click();
   document.querySelector('#hud .build-panel [data-station="dryingRack"]').click();
+  const rackSpot = d.home.defaultSpot('dryingRack');
+  d.previewPlacement(rackSpot.x, rackSpot.z);
+  d.previewPlacement(rackSpot.x, rackSpot.z);
   out.rackBuilt = d.rack.exists;
   out.costPaid = { driftwood: d.save.inventory.driftwood, shellBits: d.save.inventory.shellBits };
   out.rackBlocksGround = !d.world.isWalkable(d.rack.state.x, d.rack.state.z);
-  d.exitBurrow();
   d.walkToRack();
   step(20, () => d.rackPanel.isOpen);
   out.panelOpens = d.rackPanel.isOpen;
@@ -71,9 +73,8 @@ FLOW = r'''
   step(10, () => hopper.state === 'dying' || hopper.state === 'dead');
 
   Object.assign(d.save.inventory, { seaLettuce: 5, driftwood: 4 });
-  const nestCell = d.burrow.freeCells().find((c) => !(c.column === 6 && c.row === 5));
-  d.buildStation('helperNest', nestCell.column, nestCell.row);
-  const nest = d.burrow.state.stations.find((s) => s.kind === 'helperNest');
+  d.buildAtDefaultSpot('helperNest');
+  const nest = d.home.state.stations.find((s) => s.kind === 'helperNest');
   nest.box.inventory.seaLettuce = 6;
   nest.box.inventory.driedKelp = 0;
   d.rack.state.slots = [null, null, null];

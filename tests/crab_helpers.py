@@ -14,10 +14,8 @@ FLOW = r'''
   const spots = d.helpers.strandedVisible();
   out.spotKinds = spots.map((spot) => spot.guardKind || 'free');
   out.refusedWithoutNest = d.rescueHelperAt(spots[0]) === null;
-  const free = () => d.burrow.freeCells().filter((cell) => !(cell.column === 6 && cell.row === 5));
   Object.assign(d.save.inventory, { driftwood: 8, seaLettuce: 4 });
-  const firstCell = free()[0];
-  out.nestBuilt = d.buildStation('helperNest', firstCell.column, firstCell.row);
+  out.nestBuilt = d.buildAtDefaultSpot('helperNest');
   out.freeRescued = spots.filter((spot) => !spot.guardKind).map((spot) => Boolean(d.rescueHelperAt(spot)));
   const gullSpot = spots.find((spot) => spot.guardKind === 'gull');
   out.guardedRefused = d.rescueHelperAt(gullSpot) === null;
@@ -25,10 +23,8 @@ FLOW = r'''
   out.fullNestRefused = d.rescueHelperAt(gullSpot) === null;
   out.secondNestNeedsHeart = d.stationBuildProblem('helperNest') !== null;
   Object.assign(d.save.inventory, { pearls: 3, pebbles: 6, clay: 6, driftwood: 8, seaLettuce: 4 });
-  const heartCell = free()[0];
-  d.buildStation('burrowHeart', heartCell.column, heartCell.row);
-  const secondCell = free()[0];
-  out.secondNest = out.secondNestNeedsHeart && d.buildStation('helperNest', secondCell.column, secondCell.row);
+  d.buildAtDefaultSpot('burrowHeart');
+  out.secondNest = out.secondNestNeedsHeart && d.buildAtDefaultSpot('helperNest');
   out.guardedRescued = Boolean(d.rescueHelperAt(gullSpot));
   out.helperCount = d.helpers.list.length;
   out.jobsAtStart = d.helpers.list.map((helper) => helper.job);
@@ -42,7 +38,7 @@ FLOW = r'''
     const targets = d.helpers.list.map((h) => h.targetId).filter(Boolean);
     if (new Set(targets).size !== targets.length) sharedTarget = true;
   }
-  const nests = d.burrow.state.stations.filter((station) => station.kind === 'helperNest');
+  const nests = d.home.state.stations.filter((station) => station.kind === 'helperNest');
   const boxTotal = {};
   for (const nest of nests) for (const [type, amount] of Object.entries(nest.box.inventory)) boxTotal[type] = (boxTotal[type] || 0) + amount;
   out.nestBoxes = boxTotal;
@@ -50,19 +46,19 @@ FLOW = r'''
 
   const runner = d.helpers.list[0];
   d.helpers.setJob(runner.id, 'shellBits');
-  step(20, () => !runner.inside && runner.state === 'outbound');
-  out.runnerOutside = !runner.inside;
+  step(20, () => runner.state === 'outbound');
+  out.runnerOutside = runner.state === 'outbound';
   const crab = d.enemies.list.find((e) => e.kind === 'shoreCrab');
   Object.assign(crab, { state: 'idle', health: crab.definition.health, x: runner.x + 1, z: runner.z, respawnTimer: 0 });
   runner.health = 1;
-  step(3, () => runner.inside);
-  out.knockedOut = { inside: runner.inside, job: runner.job, count: d.helpers.list.length, toast: d.hud.gameLog.entries.map((entry) => entry.text).join(' | ') };
+  step(3, () => runner.state === 'resting');
+  out.knockedOut = { home: runner.state === 'resting', job: runner.job, count: d.helpers.list.length, toast: d.hud.gameLog.entries.map((entry) => entry.text).join(' | ') };
   Object.assign(crab, { state: 'dead', respawnTimer: 1e9 });
 
   const carrier = d.helpers.list[1];
   const carrierNest = nests.find((nest) => nest.id === carrier.nestId);
   carrierNest.box.inventory.shellBits = 12;
-  const storage = d.burrow.state.stations.find((station) => station.kind === 'storage');
+  const storage = d.home.state.stations.find((station) => station.kind === 'storage');
   const storageBefore = d.storage.inventory.shellBits || 0;
   d.helpers.setJob(carrier.id, 'carry', { fromId: carrierNest.id, toId: storage.id, material: 'shellBits' });
   step(60);
@@ -73,7 +69,7 @@ FLOW = r'''
 }
 '''
 
-SETUP_STORAGE = r'''() => { const d = window.__debug; Object.assign(d.save.inventory, { driftwood: 4 }); const cell = d.burrow.freeCells().find((c) => !(c.column === 6 && c.row === 5)); d.buildStation('storage', cell.column, cell.row); }'''
+SETUP_STORAGE = r'''() => { const d = window.__debug; Object.assign(d.save.inventory, { driftwood: 4 }); d.buildAtDefaultSpot('storage'); }'''
 
 def fresh_page(context, errors):
     page = context.new_page()
@@ -105,12 +101,12 @@ with sync_playwright() as playwright:
         'rescuedOnBoardAfterHeart': flow['jobsAtStart'] == ['board', 'board', 'board', 'board'],
         'gatherEveryJobIncludingFar': all(boxes.get(job, 0) >= 1 for job in ('shellBits', 'driftwood', 'seaLettuce', 'coral')) and boxes.get('shellBits', 0) >= 2,
         'noSharedTargets': not flow['sharedTarget'],
-        'knockedOutGoesHomeWithoutJob': flow['runnerOutside'] and flow['knockedOut']['inside'] and flow['knockedOut']['job'] is None and flow['knockedOut']['count'] == 4 and 'nest' in flow['knockedOut']['toast'],
+        'knockedOutGoesHomeWithoutJob': flow['runnerOutside'] and flow['knockedOut']['home'] and flow['knockedOut']['job'] is None and flow['knockedOut']['count'] == 4 and 'nest' in flow['knockedOut']['toast'],
         'carryBetweenBoxes': flow['carried'] >= 5 and flow['nestLeft'] <= 7,
     })
     page.reload()
     page.wait_for_function('!!window.__debug', timeout=180000)
-    reloaded = page.evaluate("() => { const d = window.__debug; return { helpers: d.helpers.list.length, nests: d.burrow.state.stations.filter((s) => s.kind === 'helperNest').length, stranded: d.helpers.strandedVisible().length, carryJob: d.helpers.list.some((h) => h.job === 'carry' && h.carryOrder && h.carryOrder.material === 'shellBits') }; }")
+    reloaded = page.evaluate("() => { const d = window.__debug; return { helpers: d.helpers.list.length, nests: d.home.state.stations.filter((s) => s.kind === 'helperNest').length, stranded: d.helpers.strandedVisible().length, carryJob: d.helpers.list.some((h) => h.job === 'carry' && h.carryOrder && h.carryOrder.material === 'shellBits') }; }")
     print(json.dumps({'reloaded': reloaded}), flush=True)
     checks['saved'] = reloaded == {'helpers': 4, 'nests': 2, 'stranded': 2, 'carryJob': True}
     context.close()
@@ -122,14 +118,14 @@ with sync_playwright() as playwright:
     old.on('pageerror', lambda error: errors.append(str(error)))
     old.goto(URL)
     old.wait_for_function('!!window.__debug', timeout=180000)
-    migrated = old.evaluate("() => { const d = window.__debug; const nest = d.burrow.state.stations.find((s) => s.kind === 'helperNest'); return { version: d.save.version, nest: Boolean(nest), housed: d.helpers.list.every((h) => nest && h.nestId === nest.id), jobs: d.helpers.list.map((h) => h.job), stranded: d.helpers.strandedVisible().length, workshopDug: d.burrow.isDug(6, 5), fogStart: d.fog.isRevealed(13, -21) }; }")
+    migrated = old.evaluate("() => { const d = window.__debug; const nest = d.home.state.stations.find((s) => s.kind === 'helperNest'); return { version: d.save.version, nest: Boolean(nest), housed: d.helpers.list.every((h) => nest && h.nestId === nest.id), jobs: d.helpers.list.map((h) => h.job), stranded: d.helpers.strandedVisible().length, workshopInYard: d.home.state.stations.some((s) => s.kind === 'workshop' && d.home.isInYard(s.x, s.z)), fogStart: d.fog.isRevealed(13, -21) }; }")
     print(json.dumps({'migrated': migrated}), flush=True)
-    checks['migratesOldHelpers'] = migrated == {'version': 7, 'nest': True, 'housed': True, 'jobs': ['shellBits', 'driftwood'], 'stranded': 4, 'workshopDug': True, 'fogStart': True}
+    checks['migratesOldHelpers'] = migrated == {'version': 8, 'nest': True, 'housed': True, 'jobs': ['shellBits', 'driftwood'], 'stranded': 4, 'workshopInYard': True, 'fogStart': True}
     legacy.close()
 
     mobile = browser.new_context(viewport={'width': 412, 'height': 915}, is_mobile=True, has_touch=True, device_scale_factor=2)
     touch = fresh_page(mobile, errors)
-    touch.evaluate('''() => { const d = window.__debug; d.setPaused(false); Object.assign(d.save.inventory, { shellBits: 5, driftwood: 7, seaLettuce: 5 }); d.buildWorkshop(); const cell = d.burrow.freeCells().find((c) => !(c.column === 6 && c.row === 5)); d.buildStation('helperNest', cell.column, cell.row); d.rescueHelperAt(d.helpers.strandedVisible()[0]); d.enterBurrow(); }''')
+    touch.evaluate('''() => { const d = window.__debug; d.setPaused(false); Object.assign(d.save.inventory, { shellBits: 5, driftwood: 7, seaLettuce: 5 }); d.buildWorkshop(); d.buildAtDefaultSpot('helperNest'); d.rescueHelperAt(d.helpers.strandedVisible()[0]); d.goHome(); }''')
     touch.tap('#hud .helpers-button')
     touch.select_option('#hud .helpers-panel select[data-job]', 'driftwood')
     panel = touch.evaluate('''() => { const d = window.__debug; return { open: d.helpersPanel.isOpen, jobs: d.helpers.list.map((h) => h.job) }; }''')

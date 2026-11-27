@@ -28,7 +28,7 @@ SCRIPT = r'''
   let unreachable = 0;
   for (const node of d.resources.nodes) if (!node.gathered && !d.navigation.findPath(p.x, p.z, node.x, node.z).length) unreachable++;
   report.unreachableNodes = unreachable;
-  report.buildButtonShown = !document.querySelector('#hud .burrow-buttons').classList.contains('hidden');
+  report.buildButtonShown = !document.querySelector('#hud .home-buttons').classList.contains('hidden');
   const t0 = performance.now(); for (let i = 0; i < 200; i++) d.navigation.findPath(p.x, p.z, -90 + (i % 20) * 9, -100 + Math.floor(i / 20) * 20); report.pathMsAverage = +((performance.now() - t0) / 200).toFixed(2);
   return report;
 }

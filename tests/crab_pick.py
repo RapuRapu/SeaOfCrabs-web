@@ -16,21 +16,13 @@ FLOW = r'''
     const point = new d.camera.position.constructor(x, y, z).project(d.camera);
     return [(point.x + 1) / 2 * innerWidth, (1 - point.y) / 2 * innerHeight];
   };
-  if (d.isUnderground()) d.exitBurrow();
-  const entrance = d.burrow.state.entrance;
-  const surfaceY = d.world.heightAt(entrance.x, entrance.z);
-  out.entranceOnModel = Boolean(d.burrow.entranceUnder(...screenOf(entrance.x, surfaceY + 0.3, entrance.z), d.camera));
-  out.entranceBesideModel = Boolean(d.burrow.entranceUnder(...screenOf(entrance.x + 4.5, d.world.heightAt(entrance.x + 4.5, entrance.z), entrance.z), d.camera));
 
-  d.enterBurrow();
-  for (let column = 2; column <= 4; column++) for (let row = 1; row <= 3; row++) d.burrow.finishDig(column, row);
-  d.buildStation('crabBed', 3, 2);
-  const bed = d.burrow.stationOf('crabBed');
-  const spot = d.burrow.stationSpot(bed);
-  out.bedOnModel = d.burrow.stationUnder(...screenOf(spot.x, 200.3, spot.z), d.camera) === bed;
-  out.bedBesideModel = d.burrow.stationUnder(...screenOf(spot.x + 2.6, 200, spot.z + 2.6), d.camera) === bed;
-  const shaft = d.burrow.shaftCenter;
-  out.shaftBeside = Boolean(d.burrow.shaftUnder(...screenOf(shaft.x - 3, 200, shaft.z - 3), d.camera));
+  d.goHome();
+  d.buildAtDefaultSpot('crabBed');
+  const bed = d.home.stationOf('crabBed');
+  const floor = d.world.heightAt(bed.x, bed.z);
+  out.bedOnModel = d.home.stationUnder(...screenOf(bed.x, floor + 0.2, bed.z), d.camera) === bed;
+  out.bedBesideModel = d.home.stationUnder(...screenOf(bed.x + 3, d.world.heightAt(bed.x + 3, bed.z + 3), bed.z + 3), d.camera) === bed;
   return out;
 }
 '''
@@ -48,9 +40,7 @@ with sync_playwright() as playwright:
     out = page.evaluate(FLOW)
     print(json.dumps(out))
     checks = {
-        'entranceOnlyOnModel': out['entranceOnModel'] and not out['entranceBesideModel'],
         'bedOnlyOnModel': out['bedOnModel'] and not out['bedBesideModel'],
-        'shaftNotFromAfar': not out['shaftBeside'],
         'noErrors': not errors,
     }
     print(json.dumps(checks, indent=2), errors)

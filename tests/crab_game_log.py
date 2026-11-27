@@ -18,7 +18,7 @@ FLOW = r'''
   d.buildWorkshop();
   out.buildLogged = texts().some((t) => t.startsWith('build|'));
 
-  if (d.isUnderground()) d.exitBurrow();
+
   const crab = d.enemies.list.find((e) => e.kind === 'shoreCrab');
   const home = crab.home || crab;
   const spot = d.navigation.nearestWalkable(home.x + 3, home.z, 10);
