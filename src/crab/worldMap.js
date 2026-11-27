@@ -24,8 +24,38 @@ export const REEF_HIGHEST = -1.2;
 export const WEST_REEF = { startX: -130, fullX: -210, extraReach: 84 };
 export const DEEP_REEF = { startZ: 125, fullZ: 150, extraDepth: 1.2 };
 
-export const CHANNEL = { centerX: 192, wiggle: 26, wander: 18, lagoonZ: -115, lagoonLength: 28, lagoonExtraHalfWidth: 16, inlandHalfWidth: 13, mouthHalfWidth: 30, mouthStartZ: -220, mouthFullZ: 150, bankWidth: 16, floor: -8, inlandEndZ: -300 };
-export const SANDBAR = { z: 22, halfLength: 6, rampLength: 6, curve: 8, spitWidening: 0.9, top: -2.0, openBelowTop: 0.4 };
+export const CHANNEL = { wander: 6, lagoonZ: -115, lagoonLength: 28, lagoonExtraHalfWidth: 14, inlandHalfWidth: 14, mouthHalfWidth: 30, mouthStartZ: -220, mouthFullZ: 150, bankWidth: 16, floor: -8, inlandEndZ: -300 };
+export const CHANNEL_COURSE = [
+  { x: 205, z: -290 },
+  { x: 190, z: -220 },
+  { x: 216, z: -170 },
+  { x: 178, z: -118 },
+  { x: 168, z: -70 },
+  { x: 192, z: -30 },
+  { x: 212, z: 10 },
+  { x: 198, z: 60 },
+  { x: 224, z: 110 },
+  { x: 202, z: 160 },
+  { x: 192, z: 210 },
+  { x: 198, z: 290 },
+];
+export const SANDBAR = { top: -2.0, openBelowTop: 0.4 };
+export const CROSSING_BAR = {
+  halfWidth: 4.5,
+  rampLength: 5,
+  saddleDepth: 0.5,
+  saddleFrequency: 0.12,
+  path: [{ x: 160, z: 12 }, { x: 174, z: 26 }, { x: 190, z: 14 }, { x: 203, z: 31 }, { x: 218, z: 17 }, { x: 233, z: 32 }, { x: 249, z: 21 }, { x: 262, z: 26 }],
+};
+export const SIDE_BARS = [
+  { z: -196, halfLength: 22, anchorShare: 1.1, reach: 0.65, rampLength: 6 },
+  { z: -150, halfLength: 26, anchorShare: 1.1, reach: 0.7, rampLength: 6 },
+  { z: -100, halfLength: 30, anchorShare: 1.1, reach: 0.75, rampLength: 7 },
+  { z: -48, halfLength: 24, anchorShare: 1.1, reach: 0.7, rampLength: 6 },
+  { z: 76, halfLength: 28, anchorShare: 1.1, reach: 0.8, rampLength: 10 },
+  { z: 128, halfLength: 26, anchorShare: 1.1, reach: 0.6, rampLength: 18 },
+  { z: 178, halfLength: 20, anchorShare: 1.0, reach: 0.5, rampLength: 18 },
+];
 
 export const BOULDERS = [
   { x: -34, z: -52, radius: 10.5, squash: 0.74, seed: 1 },

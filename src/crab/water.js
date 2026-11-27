@@ -130,6 +130,17 @@ void main() {
   float foam = foamBand * foamBand * smoothstep(0.5, 0.72, foamLace + 0.24 * foamBand) * (1.0 - inPool) * sandFloor * sandFloor;
   color = mix(color, vec3(1.02, 1.0, 0.96), min(1.0, foam) * 0.65);
 
+  float channelFlow = texture2D(uRetained, retainedUv(point)).a;
+  if (channelFlow > 0.01) {
+    float drift = -uTime * uTideFlow;
+    float streakA = texture2D(uNoise, vec2(point.x * 0.09, point.y * 0.03 + drift * 0.045)).r;
+    float streakB = texture2D(uNoise, vec2(point.x * 0.17 + 0.3, point.y * 0.05 + drift * 0.08)).g;
+    float streaks = smoothstep(0.62, 0.95, streakA * 0.6 + streakB * 0.55);
+    float flowStrength = channelFlow * smoothstep(0.15, 0.6, abs(uTideFlow)) * smoothstep(0.4, 1.6, directDepth);
+    color = mix(color, vec3(0.9, 0.96, 0.97), streaks * flowStrength * 0.14);
+    color *= 1.0 - 0.16 * channelFlow * smoothstep(1.5, 4.5, directDepth);
+  }
+
   float hazeReach = surfaceDistance * uHazeDensity;
   float haze = 1.0 - exp(-hazeReach * hazeReach);
   color = mix(color, uHazeColor, haze);

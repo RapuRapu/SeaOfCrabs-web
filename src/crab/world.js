@@ -2,7 +2,10 @@ import * as THREE from 'three';
 import { createNoise2D, createRandom, fractalNoise, smoothstep, lerp } from '../noise.js';
 import { WORLD_BOUNDS, PLAY_BOUNDS, boundsWidth, boundsDepth } from './worldBounds.js';
 import { createTerrain } from './terrain.js';
-import { WEST_REEF, DEEP_REEF, CHANNEL, SANDBAR, CAMP_FLAT, GULL_PERCHES, relocateLegacyPoint, SHORE, POOLS, REEF_INNER_EDGE_Z, REEF_OUTER_EDGE_Z, REEF_DROP_LENGTH, REEF_EDGE_RAGGEDNESS, REEF_FLAT_HEIGHT, REEF_HIGHEST, BOULDERS, DRIFT_LOGS, LOBSTER_LAIR, REEF_PROP_KEEP_CLEAR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS } from './worldMap.js';
+import { shapeChannel, isTidalGround, channelRocks, channelInfluenceAt, thalwegPointAt, isNearCrossing } from './channel.js';
+
+export { channelCenterAt, sandbarCenterZAt, channelInfluenceAt, isOnChannelThalweg, thalwegPointAt, isNearCrossing } from './channel.js';
+import { WEST_REEF, DEEP_REEF, SANDBAR, CAMP_FLAT, GULL_PERCHES, relocateLegacyPoint, SHORE, POOLS, REEF_INNER_EDGE_Z, REEF_OUTER_EDGE_Z, REEF_DROP_LENGTH, REEF_EDGE_RAGGEDNESS, REEF_FLAT_HEIGHT, REEF_HIGHEST, BOULDERS, DRIFT_LOGS, LOBSTER_LAIR, REEF_PROP_KEEP_CLEAR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS } from './worldMap.js';
 
 export { relocateLegacyPoint, WORLD_BOUNDS, PLAY_BOUNDS, LOBSTER_LAIR, CAMP, CAT_LAIR, CAMP_PROPS, HOLD, COOK_SPOT, HOLD_PROPS };
 export const DEEP_WATER_HEIGHT = -6.2;
@@ -76,55 +79,6 @@ export function heightAt(x, z) {
   return shapeLandmarks(x, z, height);
 }
 
-const channelNoise = createNoise2D(211);
-const CHANNEL_BANK_WIDENING_PER_HEIGHT = 2.2;
-const CHANNEL_ROCK_SEED = 4242;
-const CHANNEL_ROCK_SPACING = 13;
-const CHANNEL_ROCK_CHANCE = 0.6;
-const CHANNEL_ROCKS_SEAWARD_LIMIT_Z = 120;
-const TIDAL_GROUND_ABOVE_SANDBAR = 1.2;
-export const channelCenterAt = (z) => CHANNEL.centerX + CHANNEL.wiggle * Math.sin(z * 0.011 + 0.7) + CHANNEL.wander * channelNoise(z * 0.018, 1.7) + 0.4 * CHANNEL.wander * Math.sin(z * 0.047 + 2.1);
-const lagoonBulgeAt = (z) => CHANNEL.lagoonExtraHalfWidth * Math.exp(-(((z - CHANNEL.lagoonZ) / CHANNEL.lagoonLength) ** 2));
-const channelHalfWidthAt = (z) => (lerp(CHANNEL.inlandHalfWidth, CHANNEL.mouthHalfWidth, smoothstep(CHANNEL.mouthStartZ, CHANNEL.mouthFullZ, z)) + lagoonBulgeAt(z)) * (0.72 + 0.28 * channelNoise(z * 0.025, 0.5));
-const channelBankWidthAt = (x, z, height) => (CHANNEL.bankWidth + CHANNEL_BANK_WIDENING_PER_HEIGHT * Math.max(0, height)) * (1 + 0.45 * channelNoise(z * 0.03, x > channelCenterAt(z) ? 5.1 : 8.4));
-const channelAcrossAt = (x, z) => Math.abs(x - channelCenterAt(z)) + 3 * channelNoise(x * 0.09, z * 0.09);
-
-export const sandbarCenterZAt = (x) => {
-  const along = x - channelCenterAt(SANDBAR.z);
-  return SANDBAR.z + SANDBAR.curve * Math.sin(along * 0.06) + 2 * channelNoise(x * 0.05, 3.3);
-};
-
-function sandbarShareAt(x, z) {
-  const across = Math.abs(x - channelCenterAt(SANDBAR.z));
-  const halfWidth = channelHalfWidthAt(SANDBAR.z);
-  const spitWidening = 1 + SANDBAR.spitWidening * smoothstep(halfWidth * 0.45, halfWidth * 1.1, across);
-  const halfLength = SANDBAR.halfLength * (0.8 + 0.3 * channelNoise(x * 0.04, 7.7)) * spitWidening;
-  return 1 - smoothstep(halfLength, halfLength + SANDBAR.rampLength, Math.abs(z - sandbarCenterZAt(x)));
-}
-
-export function isTidalGround(x, z, height) {
-  return height < SANDBAR.top + TIDAL_GROUND_ABOVE_SANDBAR && channelAcrossAt(x, z) < channelHalfWidthAt(z) + CHANNEL.bankWidth * 1.5 && z > CHANNEL.inlandEndZ;
-}
-
-function channelRocks() {
-  const random = createRandom(CHANNEL_ROCK_SEED);
-  const rocks = [];
-  for (let z = PLAY_BOUNDS.minZ + 6; z < CHANNEL_ROCKS_SEAWARD_LIMIT_Z; z += CHANNEL_ROCK_SPACING) {
-    for (const side of [-1, 1]) {
-      if (random() > CHANNEL_ROCK_CHANCE) continue;
-      const rockZ = z + (random() - 0.5) * CHANNEL_ROCK_SPACING;
-      const offset = channelHalfWidthAt(rockZ) + 1.5 + random() * CHANNEL.bankWidth * 0.7;
-      const x = channelCenterAt(rockZ) + side * offset;
-      const radius = 1.8 + random() * random() * 5;
-      if (Math.abs(rockZ - sandbarCenterZAt(x)) < SANDBAR.halfLength * 2 + radius + 4) continue;
-      if (Math.hypot(x - HOLD.x, rockZ - HOLD.z) < HOLD.halfLength + radius + 6) continue;
-      if ([...BOULDERS, ...rocks].some((other) => Math.hypot(other.x - x, other.z - rockZ) < other.radius + radius + 2)) continue;
-      rocks.push({ x, z: rockZ, radius, squash: 0.6 + random() * 0.3, seed: 100 + rocks.length });
-    }
-  }
-  return rocks;
-}
-
 let campLevel = null;
 
 function shapeLandmarks(x, z, height) {
@@ -133,15 +87,7 @@ function shapeLandmarks(x, z, height) {
     if (campLevel === null) campLevel = beachHeight(CAMP.x, CAMP.z);
     height = lerp(campLevel, height, smoothstep(CAMP.radius * CAMP_FLAT.innerShare, CAMP.radius * CAMP_FLAT.outerShare, fromCamp));
   }
-  const across = channelAcrossAt(x, z);
-  const halfWidth = channelHalfWidthAt(z);
-  const bankWidth = channelBankWidthAt(x, z, height);
-  if (across > halfWidth + bankWidth || z < CHANNEL.inlandEndZ) return height;
-  const channelShare = 1 - smoothstep(halfWidth, halfWidth + bankWidth, across);
-  height = lerp(height, Math.min(height, CHANNEL.floor + 0.6 * channelNoise(x * 0.08, z * 0.08)), channelShare);
-  const barShare = sandbarShareAt(x, z);
-  if (barShare > 0) height = Math.max(height, lerp(height, SANDBAR.top + 0.35 * channelNoise(x * 0.12, z * 0.2), barShare));
-  return height;
+  return shapeChannel(x, z, height);
 }
 
 export const isSandbarOpen = (seaLevel) => seaLevel < SANDBAR.top + SANDBAR.openBelowTop;
@@ -330,6 +276,9 @@ function buildRetainedWater() {
     packed[cell * 4] = hasWater ? THREE.DataUtils.toHalfFloat(levels[cell]) : noWaterHalf;
     packed[cell * 4 + 1] = hasInfluence ? THREE.DataUtils.toHalfFloat(influence[cell]) : zeroHalf;
     packed[cell * 4 + 2] = influence[cell] > 0.001 ? THREE.DataUtils.toHalfFloat(weightedLevel[cell] / influence[cell]) : noWaterHalf;
+    const column = cell % columns;
+    const channelShare = channelInfluenceAt(grid.centerX(column), grid.centerZ((cell - column) / columns));
+    packed[cell * 4 + 3] = channelShare > 0 ? THREE.DataUtils.toHalfFloat(channelShare) : zeroHalf;
   }
   const texture = new THREE.DataTexture(packed, columns, rows, THREE.RGBAFormat, THREE.HalfFloatType);
   texture.magFilter = THREE.LinearFilter;
@@ -463,6 +412,7 @@ export function isInHold(x, z) {
 const areaAround = (x, z, halfWidth, halfDepth) => ({ minX: x - halfWidth, maxX: x + halfWidth, minZ: z - halfDepth, maxZ: z + halfDepth });
 export const CAMP_AREA = areaAround(CAMP.x, CAMP.z, CAMP.radius, CAMP.radius);
 export const HOLD_AREA = areaAround(HOLD.x, HOLD.z, HOLD.halfLength, HOLD.halfWidth);
+export const CHANNEL_AREA = { minX: 120, maxX: 300, minZ: PLAY_BOUNDS.minZ, maxZ: 200 };
 export const REEF_AREA = { minX: PLAY_BOUNDS.minX, maxX: PLAY_BOUNDS.maxX, minZ: REEF_INNER_EDGE_Z - 10, maxZ: REEF_OUTER_EDGE_Z + WEST_REEF.extraReach + 6 };
 
 export function isInCamp(x, z) {
@@ -614,7 +564,7 @@ export function createWorld(quality) {
   const logs = DRIFT_LOGS.map((log) => ({ ...log, y: collisionField.sample(log.x, log.z) }));
   const reefProps = placeReefProps(collisionField.sample, boulders);
   const morayDens = placeMorayDens(reefProps);
-  const terrain = createTerrain({ heightAt, reefShareAt, reefOuterEdgeAt, retained, boulders, logs, quality });
+  const terrain = createTerrain({ heightAt, reefShareAt, reefOuterEdgeAt, channelInfluenceAt, retained, boulders, logs, quality });
   const walkability = buildWalkability(ground, collectStaticBlockers(boulders, logs, reefProps));
   const walkGrid = walkability.grid;
 
@@ -655,7 +605,7 @@ export function createWorld(quality) {
   return {
     ground, heightAt: collisionField.sample, retained, pools: retained.pools, boulders, logs, reefProps, morayDens, campProps: CAMP_PROPS, holdProps: HOLD_PROPS, isInHold, isInCamp,
     terrain, terrainMesh: terrain.mesh, walkGrid, isCellWalkable: walkability.isCellWalkable, isWalkable, isOnReef, waterLevelAt, randomSpot, createRandom,
-    isTidal, updateSeaLevel, isSandbarOpen: () => sandbarOpen,
+    isTidal, updateSeaLevel, thalwegPointAt, isNearCrossing, channelInfluenceAt, isSandbarOpen: () => sandbarOpen,
     blockCircle: walkability.blockCircle, unblockCells: walkability.unblockCells, prepareAround, computedCollisionChunks: collisionField.computedChunkCount,
   };
 }
@@ -666,6 +616,7 @@ const HIGH_TIDE_MARK = TIDE_MIDDLE + TIDE_AMPLITUDE;
 
 export const HOME_BEACH_ENEMIES = [
   { kind: 'sandHopper', count: 28, packSize: [3, 4], accept: (world, x, z, height) => height > HIGH_TIDE_MARK + 0.6 && z > -74 && !isInCamp(x, z) && Math.hypot(x - HOLD.x, z - HOLD.z) > HOLD.halfLength + 6 && Math.hypot(x - CAMP.x, z - CAMP.z) > CAMP.radius + 8 && world.retained.levelAt(x, z) < height },
+  { kind: 'velvetCrab', count: 8, area: CHANNEL_AREA, accept: (world, x, z, height) => channelInfluenceAt(x, z) > 0.4 && height < -2.4 && height > -5.8 },
   { kind: 'shoreCrab', count: 10, accept: (world, x, z, height) => { if (isOnReef(x, z)) return false; const depth = world.retained.levelAt(x, z) - height; return depth > 0.3 && depth < 1.6; } },
   { kind: 'gull', count: 1, spotsFrom: () => [GULL_PERCHES[0]], accept: () => true, territory: (x, z) => z < GULL_TERRITORY_EDGE_Z && Math.abs(x - GULL_PERCHES[0].x) < GULL_TERRITORY_HALF_WIDTH },
   { kind: 'gull', count: 1, spotsFrom: () => [GULL_PERCHES[1]], accept: () => true, territory: (x, z) => z < GULL_TERRITORY_EDGE_Z && Math.abs(x - GULL_PERCHES[1].x) < GULL_TERRITORY_HALF_WIDTH },

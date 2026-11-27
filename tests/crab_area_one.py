@@ -15,6 +15,16 @@ FLOW = r'''
   tideAt(360);
   out.lowTideOpensHold = d.navigation.findPath(home.x, home.z, holdDoor.x, holdDoor.z).length > 0;
   out.sandbarIsTidal = d.world.isTidal(192, 22);
+  let highestThalweg = -99;
+  for (let z = -256; z <= 200; z += 1) {
+    const point = d.world.thalwegPointAt(z);
+    if (d.world.isNearCrossing(point.x, point.z, 8)) continue;
+    highestThalweg = Math.max(highestThalweg, d.world.heightAt(point.x, point.z));
+  }
+  out.channelOnlyCrossableAtSandbar = highestThalweg < -6.2;
+  const velvet = d.enemies.list.filter((enemy) => enemy.kind === 'velvetCrab');
+  out.velvetCrabsInChannel = velvet.length >= 6 && velvet.every((enemy) => d.world.channelInfluenceAt(enemy.x, enemy.z) > 0.3);
+  out.pearlsOnSideBars = d.resources.nodes.filter((node) => node.type === 'pearls' && !node.gathered && d.world.channelInfluenceAt(node.x, node.z) > 0.4).length >= 3;
   out.campReachable = d.navigation.findPath(home.x, home.z, -240, -150).length > 0;
   out.deepReefReachable = d.navigation.findPath(home.x, home.z, -250, 150).length > 0;
 

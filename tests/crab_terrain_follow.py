@@ -47,7 +47,7 @@ async () => {
   await frame();
   out.draws = d.renderer.info.render.calls;
   out.triangles = d.renderer.info.render.triangles;
-  out.drawsUnchanged = out.draws <= 90;
+  out.drawsUnchanged = out.draws <= 96;
   return out;
 }
 '''

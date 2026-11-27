@@ -117,6 +117,8 @@ const PEBBLE_LAYER_SEED = 404;
 const LOW_FLAT_HIGHEST = -1.3;
 const LOW_FLAT_LOWEST = -3.4;
 const LOW_FLAT_PEBBLE_CHANCE = 0.14;
+const LOW_FLAT_SHELL_SHARE = 0.55;
+const SHELL_COLORS = [linearColor(0.92, 0.86, 0.76), linearColor(0.95, 0.8, 0.72), linearColor(0.84, 0.82, 0.78), linearColor(0.62, 0.48, 0.4)];
 
 function pebbleAt(world, random, x, z, aroundBoulder) {
   if (world.isInHold(x, z)) return null;
@@ -132,7 +134,11 @@ function pebbleAt(world, random, x, z, aroundBoulder) {
   transform.rotation.set(random() * 0.16, random() * Math.PI * 2, random() * 0.16);
   transform.scale.set(size * (0.8 + random() * 0.6), size * (0.35 + random() * 0.3), size * (0.7 + random() * 0.5));
   transform.updateMatrix();
-  const color = new THREE.Color().copy(PEBBLE_COLORS[Math.floor(random() * PEBBLE_COLORS.length)]).multiplyScalar(0.75 + random() * 0.5);
+  const isShell = onLowFlat && random() < LOW_FLAT_SHELL_SHARE;
+  if (isShell) transform.scale.y *= 0.55;
+  if (isShell) transform.updateMatrix();
+  const palette = isShell ? SHELL_COLORS : PEBBLE_COLORS;
+  const color = new THREE.Color().copy(palette[Math.floor(random() * palette.length)]).multiplyScalar(0.75 + random() * 0.5);
   return { matrix: transform.matrix, color, sizeClass: size > 0.5 ? 1 : 0 };
 }
 

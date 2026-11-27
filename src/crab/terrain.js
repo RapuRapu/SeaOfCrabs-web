@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { createNoise2D, fractalNoise, smoothstep } from '../noise.js';
+import { createNoise2D, fractalNoise, smoothstep, lerp } from '../noise.js';
 import { applySeaside } from './seaside.js';
 
 const VISUAL_HALF_SIZE = 190;
@@ -21,10 +21,14 @@ const REEF_CORALLINE = linearColor(0.8, 0.46, 0.5);
 const REEF_TURF = linearColor(0.36, 0.4, 0.22);
 const REEF_SAND = linearColor(0.88, 0.82, 0.66);
 const REEF_LIP = linearColor(0.86, 0.8, 0.7);
+const TIDAL_MUD = linearColor(0.52, 0.46, 0.36);
+const BAR_SAND = linearColor(0.9, 0.8, 0.6);
+const EELGRASS_FLOOR = linearColor(0.34, 0.42, 0.26);
+const SHELL_GRAVEL = linearColor(0.62, 0.6, 0.54);
 const reefColor = new THREE.Color();
 
 
-export function createTerrain({ heightAt, reefShareAt, reefOuterEdgeAt, retained, boulders, logs, quality }) {
+export function createTerrain({ heightAt, reefShareAt, reefOuterEdgeAt, channelInfluenceAt, retained, boulders, logs, quality }) {
   const halfCells = Math.round(VISUAL_HALF_SIZE / quality.terrainCellSize);
   const cellsPerSide = halfCells * 2;
   const cellSize = (VISUAL_HALF_SIZE * 2) / cellsPerSide;
@@ -74,6 +78,17 @@ export function createTerrain({ heightAt, reefShareAt, reefOuterEdgeAt, retained
       color.lerp(POOL_CORALLINE, smoothstep(0.2, 0.5, -patch) * poolDepth * 0.55);
     }
     color.lerp(DEEP_SILT, smoothstep(-3.5, -8, height) * (submergedInPool > 0 ? 0 : 0.8));
+    const inChannel = channelInfluenceAt(x, z);
+    if (inChannel > 0) {
+      const wander = fractalNoise(tintNoise, x * 0.07 + 40, z * 0.07, 2);
+      const mudShare = smoothstep(1.2 + wander, -0.6 + wander, height) * smoothstep(-6.5, -3.5, height);
+      color.lerp(TIDAL_MUD, mudShare * inChannel * (0.55 + 0.3 * patch));
+      const barShare = smoothstep(-3.0 + 0.5 * wander, -2.0, height) * smoothstep(-0.4, -1.4, height);
+      const ripples = 0.94 + 0.06 * Math.sin(x * 1.6 + z * 0.4 + 4 * wander);
+      color.lerp(BAR_SAND, barShare * inChannel * 0.7).multiplyScalar(lerp(1, ripples, barShare * inChannel));
+      color.lerp(EELGRASS_FLOOR, smoothstep(-2.6, -3.6, height) * smoothstep(-6.8, -5.6, height) * inChannel * smoothstep(-0.3, 0.4, wander) * 0.75);
+      color.lerp(SHELL_GRAVEL, smoothstep(-6.2, -7.2, height) * inChannel * 0.6);
+    }
 
     let contactShade = 1;
     for (const boulder of boulders) {

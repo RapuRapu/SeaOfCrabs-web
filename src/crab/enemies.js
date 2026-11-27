@@ -32,9 +32,11 @@ export const ENEMY_KINDS = {
   cockroach: { label: 'Cockroach', level: 9, drops: ['wax', 'fishBone'], health: 90, attack: 26, defense: 10, attackInterval: 1.0, windup: 0.25, speed: 7.5, radius: 1.1, bodyReach: 2.2, temperament: 'aggressive', sightRange: 9, experience: 160, pearlChance: 0.1, respawnSeconds: 100, barHeight: 2.4, hold: true },
   cook: { label: 'The Cook', level: 13, health: 1550, attack: 48, defense: 16, attackInterval: 2.6, windup: 1.3, speed: 4.3, radius: 3.6, temperament: 'aggressive', sightRange: 0, nerves: true, flees: true, telegraph: { shape: 'line', lineLength: 24, lineWidth: 3.6, lineRange: 15, stompEvery: 3, stompRadius: 7.5, stompWindup: 1.1 }, experience: 2000, pearlChance: 1, pearlCount: 4, respawnSeconds: 480, barHeight: 13, boss: true, hold: true, dailyBoss: true },
   rivalHermit: { label: 'Rival hermit crab', level: 4, drops: ['shellBits', 'driftwood'], health: 70, attack: 9, defense: 4, attackInterval: 1.4, windup: 0.5, speed: 5.0, radius: 1.25, bodyReach: 1.8, temperament: 'aggressive', sightRange: 8, experience: 50, pearlChance: 0.15, respawnSeconds: 120, barHeight: 3.9, ownShell: 'cone' },
+  velvetCrab: { label: 'Velvet crab', looksLike: 'shoreCrab', tint: [0.42, 0.36, 0.62], visualScale: 1.3, level: 5, drops: ['seaLettuce', 'kelp'], health: 66, attack: 12, defense: 4, attackInterval: 1.3, windup: 0.45, speed: 6.0, radius: 1.15, temperament: 'aggressive', sightRange: 7, experience: 55, pearlChance: 0.2, respawnSeconds: 100, barHeight: 2.5 },
   giantLobster: { label: 'Giant lobster', level: 11, health: 1040, attack: 30, defense: 8, attackInterval: 2.6, windup: 1.2, speed: 3.2, radius: 3.0, temperament: 'aggressive', sightRange: 0, telegraph: { reach: 4.4, radius: 3.0 }, experience: 800, pearlChance: 1, pearlCount: 2, respawnSeconds: MINIBOSS_RESPAWN_SECONDS, barHeight: 7.5, boss: true, reef: true },
 };
 
+const looksLike = (kind) => ENEMY_KINDS[kind].looksLike || kind;
 const MINIMUM_RESPAWN_DISTANCE = 25;
 const WANDER_RADIUS = 6;
 const REPATH_SECONDS = 0.5;
@@ -351,6 +353,14 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
   const replacedMeshes = new Set(replacedByModels);
   const regionVisible = { reef: true, camp: true, hold: true };
 
+  function tintCreature(creature, [red, green, blue]) {
+    creature.object.traverse((part) => {
+      if (!part.material) return;
+      part.material = part.material.clone();
+      part.material.color.multiply(new THREE.Color(red, green, blue).multiplyScalar(1.6));
+    });
+  }
+
   function modelScale(kind, creature) {
     const entry = MODEL_REPLACES[kind];
     if (!entry || !entry.scale) return 1;
@@ -450,9 +460,10 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       enemy.bar = createBar(enemy);
       if (entry.kind === 'gull') enemy.model = createGullModel(scene, quality);
       if (entry.kind === 'rivalHermit') enemy.hermit = createHermit(scene, quality, SHELLS[ENEMY_KINDS.rivalHermit.ownShell].look, { crabModel: 'helper', scale: RIVAL_HERMIT_SCALE, bodyTint: RIVAL_HERMIT_TINT, weaponScale: RIVAL_WEAPON_SCALE });
-      if (creatureAssetAvailable(entry.kind)) {
-        enemy.creature = createCreature(entry.kind, quality);
-        enemy.modelScale = modelScale(entry.kind, enemy.creature);
+      if (creatureAssetAvailable(looksLike(entry.kind))) {
+        enemy.creature = createCreature(looksLike(entry.kind), quality);
+        enemy.modelScale = modelScale(looksLike(entry.kind), enemy.creature);
+        if (enemy.definition.tint) tintCreature(enemy.creature, enemy.definition.tint);
         scene.add(enemy.creature.object);
         if (enemy.model) enemy.model.torso.visible = false;
       }
@@ -504,7 +515,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     const awayX = enemy.x - attacker.x;
     const awayZ = enemy.z - attacker.z;
     const length = Math.hypot(awayX, awayZ) || 1;
-    const distance = KNOCKBACK_BY_KIND[enemy.kind] ?? 0.3;
+    const distance = KNOCKBACK_BY_KIND[looksLike(enemy.kind)] ?? 0.3;
     const nextX = enemy.x + (awayX / length) * distance;
     const nextZ = enemy.z + (awayZ / length) * distance;
     if (enemy.altitude < 0.5 && world.isWalkable(nextX, nextZ)) Object.assign(enemy, { x: nextX, z: nextZ });
@@ -585,7 +596,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
   }
 
   function walkingHeading(enemy) {
-    return enemy.kind === 'shoreCrab' ? enemy.moveHeading + Math.PI / 2 : enemy.moveHeading;
+    return looksLike(enemy.kind) === 'shoreCrab' ? enemy.moveHeading + Math.PI / 2 : enemy.moveHeading;
   }
 
   const strikeReach = (enemy) => enemy.definition.radius + (enemy.definition.strikeReach || ENEMY_STRIKE_REACH);
@@ -593,7 +604,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
   function landStrike(enemy) {
     enemy.strike = 1;
     enemy.strikesMade++;
-    onSound(STRIKE_SOUNDS[enemy.kind], enemy);
+    onSound(STRIKE_SOUNDS[looksLike(enemy.kind)], enemy);
     onAttackPlayer(enemy);
   }
 
@@ -680,7 +691,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     enemy.cooldown = enemy.definition.attackInterval - enemy.definition.windup;
     enemy.strike = 1;
     enemy.strikesMade++;
-    onSound(STRIKE_SOUNDS[enemy.kind], enemy);
+    onSound(STRIKE_SOUNDS[looksLike(enemy.kind)], enemy);
     if (caught && player.alive) onAttackPlayer(enemy);
     else onDodge(enemy);
     return true;
@@ -757,7 +768,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
       if (Math.hypot(enemy.home.x - enemy.x, enemy.home.z - enemy.z) < 1 || !moving) enemy.state = 'idle';
     }
     enemy.emerge += ((enemy.state === 'chase' && enemy.retreat <= 0 ? 1 : 0) - enemy.emerge) * Math.min(1, deltaTime * (enemy.retreat > 0 ? 10 : 6));
-    if (moving && enemy.moveHeading !== undefined) turnToward(enemy, enemy.state === 'chase' && enemy.kind !== 'shoreCrab' ? Math.atan2(player.x - enemy.x, player.z - enemy.z) : walkingHeading(enemy), deltaTime, 6);
+    if (moving && enemy.moveHeading !== undefined) turnToward(enemy, enemy.state === 'chase' && looksLike(enemy.kind) !== 'shoreCrab' ? Math.atan2(player.x - enemy.x, player.z - enemy.z) : walkingHeading(enemy), deltaTime, 6);
     enemy.motion += ((moving ? 1 : 0) - enemy.motion) * Math.min(1, deltaTime * 8);
     if (definition.speed > 0 && player.alive) keepOffPlayer(enemy, player);
     if (enemy.entry.stations) followActualMovement(enemy, startX, startZ, deltaTime);
@@ -985,7 +996,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     transform.updateMatrix();
     parentMatrix.copy(transform.matrix);
     if (enemy.creature) {
-      placeCreature(enemy, CREATURE_SCALE.shoreCrab);
+      placeCreature(enemy, CREATURE_SCALE.shoreCrab * (enemy.definition.visualScale || 1));
       const windingUpNow = enemy.state === 'chase' && enemy.attackTimer < 0.45 ? 1 - enemy.attackTimer / 0.45 : 0;
       const raisedNow = (enemy.state === 'chase' ? 0.35 : 0.1 + 0.05 * Math.sin(time * 1.3 + enemy.id)) + windingUpNow * 0.55;
       enemy.creature.pose({ stride, motion: enemy.motion, raised: raisedNow, snaps: [enemy.strike, Math.max(0, (enemy.strike - 0.35) / 0.65)], recoil, fall });
@@ -1435,7 +1446,7 @@ export function createEnemies({ scene, world, navigation, quality, spawnTable, l
     viewFrustum.setFromProjectionMatrix(viewMatrix);
     for (const enemy of list) {
       if (enemy.kind === 'sandHopper') renderHopper(enemy, time);
-      else if (enemy.kind === 'shoreCrab') renderShoreCrab(enemy, time);
+      else if (looksLike(enemy.kind) === 'shoreCrab') renderShoreCrab(enemy, time);
       else if (enemy.kind === 'gull') renderGull(enemy, time);
       else if (enemy.kind === 'moray') renderMoray(enemy, time);
       else if (enemy.kind === 'octopus') renderOctopus(enemy, time);

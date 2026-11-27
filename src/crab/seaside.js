@@ -16,6 +16,7 @@ export const seaUniforms = {
   uTime: { value: 0 },
   uNoise: { value: null },
   uRetained: { value: null },
+  uTideFlow: { value: 0 },
   uWorldMin: { value: new THREE.Vector2(WORLD_BOUNDS.minX, WORLD_BOUNDS.minZ) },
   uWorldExtent: { value: new THREE.Vector2(boundsWidth(WORLD_BOUNDS), boundsDepth(WORLD_BOUNDS)) },
   uSunDirection: { value: lighting.sunDirection },
@@ -28,6 +29,7 @@ export const seaUniforms = {
 export const SEA_LEVELS_GLSL = /* glsl */ `
 uniform float uSeaLevel;
 uniform float uWetLevel;
+uniform float uTideFlow;
 uniform float uTime;
 uniform sampler2D uNoise;
 uniform sampler2D uRetained;

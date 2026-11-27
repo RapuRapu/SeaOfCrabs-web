@@ -3,9 +3,10 @@ import { PLAY_BOUNDS, boundsWidth } from './worldBounds.js';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import { createRandom } from '../noise.js';
 import { applySeaside } from './seaside.js';
-import { TIDE_MIDDLE, TIDE_AMPLITUDE, isOnReef, isInCamp, isInHold, CAMP_AREA, HOLD_AREA, REEF_AREA } from './world.js';
+import { TIDE_MIDDLE, TIDE_AMPLITUDE, isOnReef, isInCamp, isInHold, CAMP_AREA, HOLD_AREA, REEF_AREA, CHANNEL_AREA, channelInfluenceAt, isNearCrossing } from './world.js';
 
 const SHOWN_RADIUS = 150;
+const SIDE_BAR_PEARLS = 4;
 const SHOWN_REFRESH_DISTANCE = 24;
 const HOME_FOCUS = { x: 0, z: 0 };
 const AREA_ONE_ORIGINAL_WIDTH = 236;
@@ -324,6 +325,7 @@ export function createResources(scene, overlay, world, quality, savedNodes, star
   const random = createRandom(2024);
   const geometries = { shellBits: buildShellBitGeometry(), driftwood: buildDriftwoodGeometry(), seaLettuce: buildSeaLettuceGeometry(), kelp: buildKelpGeometry(), pebbles: buildPebblesGeometry(), clay: buildClayGeometry(), sand: buildSandGeometry(), pearls: buildPearlGeometry(), coral: buildCoralGeometry(), seaGlass: buildSeaGlassGeometry(), scrap: buildScrapGeometry(), cloth: buildClothGeometry(), fishBone: buildFishBoneGeometry(), wax: buildWaxGeometry() };
   const highTideMark = TIDE_MIDDLE + TIDE_AMPLITUDE;
+  const isOnSideBar = (x, z, height) => !isOnReef(x, z) && height < -1.2 && height > -2.8 && channelInfluenceAt(x, z) > 0.4 && !isNearCrossing(x, z, 14);
   const accepts = {
     shellBits: (x, z, height) => !isOnReef(x, z) && !isInCamp(x, z) && height > TIDE_MIDDLE - 1.4 && height < highTideMark + 1.6 && world.retained.levelAt(x, z) - height < 0.2,
     driftwood: (x, z, height) => !isInCamp(x, z) && height > highTideMark + 0.4 && height < highTideMark + 3.6,
@@ -349,7 +351,7 @@ export function createResources(scene, overlay, world, quality, savedNodes, star
 
   for (const [type, definition] of Object.entries(RESOURCE_TYPES)) {
     if (!definition.count) continue;
-    const count = scaledCount(type, definition.count);
+    const count = scaledCount(type, definition.count) + (type === 'pearls' ? SIDE_BAR_PEARLS : 0);
     const material = applySeaside(new THREE.MeshStandardMaterial({ vertexColors: true, roughness: { shellBits: 0.3, pearls: 0.3, seaGlass: 0.18, coral: 0.65, scrap: 0.4, wax: 0.5 }[type] ?? 0.9, side: THREE.DoubleSide }), { wetDarkening: 0.9, wetRoughness: { shellBits: 0.15, pearls: 0.15, seaGlass: 0.08, coral: 0.4 }[type] ?? 0.8, causticStrength: 1.2, chromaticCaustics: quality.chromaticCaustics, glow: type === 'seaLettuce' ? 0.14 : 0.22, glowPulse: true });
     const mesh = new THREE.InstancedMesh(geometries[type], material, count);
     mesh.castShadow = !REEF_TYPES.has(type) && !CAMP_TYPES.has(type) && !HOLD_TYPES.has(type);
@@ -414,7 +416,9 @@ export function createResources(scene, overlay, world, quality, savedNodes, star
   const searchAreaOf = (type) => (CAMP_TYPES.has(type) ? CAMP_AREA : HOLD_TYPES.has(type) ? HOLD_AREA : REEF_TYPES.has(type) ? REEF_AREA : PLAY_BOUNDS);
 
   function relocate(node, avoid) {
-    const spot = world.randomSpot(random, (x, z, height) => accepts[node.type](x, z, height) && (HOLD_TYPES.has(node.type) || !isInHold(x, z)) && !nodes.some((other) => other !== node && !other.gathered && Math.hypot(other.x - x, other.z - z) < 5) && (!avoid || Math.hypot(avoid.x - x, avoid.z - z) > 14), 400, searchAreaOf(node.type));
+    const onSideBar = node.type === 'pearls' && node.slot < SIDE_BAR_PEARLS;
+    const accept = onSideBar ? isOnSideBar : accepts[node.type];
+    const spot = world.randomSpot(random, (x, z, height) => accept(x, z, height) && (HOLD_TYPES.has(node.type) || !isInHold(x, z)) && !nodes.some((other) => other !== node && !other.gathered && Math.hypot(other.x - x, other.z - z) < 5) && (!avoid || Math.hypot(avoid.x - x, avoid.z - z) > 14), 400, onSideBar ? CHANNEL_AREA : searchAreaOf(node.type));
     if (!spot) return false;
     Object.assign(node, { x: spot.x, y: spot.y, z: spot.z, heading: random() * Math.PI * 2, size: (node.type === 'shellBits' ? 0.6 : 0.85) + random() * 0.35, gathered: false });
     return true;

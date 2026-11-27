@@ -3,11 +3,22 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import { createRandom, createNoise2D } from '../noise.js';
 import { applySeaside, createMotionDepthMaterial } from './seaside.js';
 import { createScatterLayer, attemptsFor } from './scatter.js';
+import { channelInfluenceAt, TIDE_MIDDLE, TIDE_AMPLITUDE } from './world.js';
 
 const linearColor = (red, green, blue) => new THREE.Color().setRGB(red, green, blue, THREE.SRGBColorSpace);
 const SEAWEED_COLORS = [linearColor(0.2, 0.42, 0.14), linearColor(0.34, 0.5, 0.12), linearColor(0.5, 0.3, 0.14), linearColor(0.14, 0.34, 0.2)];
 const GRASS_COLORS = [linearColor(0.62, 0.68, 0.34), linearColor(0.74, 0.72, 0.4), linearColor(0.5, 0.6, 0.3)];
 const GRASS_BLADE_SEGMENTS = 6;
+const EELGRASS_COLORS = [linearColor(0.18, 0.4, 0.12), linearColor(0.26, 0.46, 0.14), linearColor(0.14, 0.34, 0.1)];
+const SALTMARSH_COLORS = [linearColor(0.46, 0.5, 0.22), linearColor(0.58, 0.32, 0.22), linearColor(0.38, 0.46, 0.2)];
+const WRACK_COLORS = [linearColor(0.26, 0.2, 0.1), linearColor(0.34, 0.28, 0.12), linearColor(0.2, 0.18, 0.1)];
+const SEA_LETTUCE_COLORS = [linearColor(0.42, 0.66, 0.2), linearColor(0.5, 0.72, 0.24)];
+const BLADDERWRACK_COLORS = [linearColor(0.36, 0.28, 0.1), linearColor(0.44, 0.34, 0.12)];
+const EELGRASS_ATTEMPTS_PER_AREA = 0.05;
+const SALTMARSH_ATTEMPTS_PER_AREA = 0.05;
+const WRACK_ATTEMPTS_PER_AREA = 0.12;
+const SEA_LETTUCE_ATTEMPTS_PER_AREA = 0.05;
+const meadowNoise = createNoise2D(1201);
 const SEAWEED_LENGTH_SEGMENTS = 10;
 const SEAWEED_WIDTH_SEGMENTS = 2;
 const SEAWEED_MIDRIB_CUP = 0.14;
@@ -152,6 +163,114 @@ function seaweedPlacements(world, quality, chunk) {
     }
   }
   return placements;
+}
+
+function tuftsAround(world, random, centerX, centerZ, count, spread, sink, blade) {
+  const placements = [];
+  for (let index = 0; index < count; index++) {
+    const angle = random() * Math.PI * 2;
+    const distance = random() * spread;
+    const x = centerX + Math.cos(angle) * distance;
+    const z = centerZ + Math.sin(angle) * distance;
+    placements.push({ x, y: world.heightAt(x, z) - sink, z, angle: random() * Math.PI, phase: angle / 3.7 + random() * 0.4, ...blade(random) });
+  }
+  return placements;
+}
+
+function eelgrassPlacements(world, quality, chunk) {
+  const { random } = chunk;
+  const placements = [];
+  for (let attempt = attemptsFor(random, EELGRASS_ATTEMPTS_PER_AREA * quality.density); attempt > 0; attempt--) {
+    const [x, z] = chunk.pointInside();
+    if (channelInfluenceAt(x, z) < 0.4) continue;
+    const height = world.heightAt(x, z);
+    if (height > -2.4 || height < -6.0 || meadowNoise(x * 0.06, z * 0.06) < -0.2) continue;
+    const colorIndex = Math.floor(random() * EELGRASS_COLORS.length);
+    placements.push(...tuftsAround(world, random, x, z, 8 + Math.floor(random() * 8), 1.1, 0.05, (next) => ({ length: 1.1 + next() * 1.5, width: 0.11 + next() * 0.08, colorIndex, shade: 0.75 + next() * 0.45 })));
+  }
+  for (const boulder of world.boulders) {
+    if (boulder.x < chunk.minX || boulder.x >= chunk.minX + chunk.size || boulder.z < chunk.minZ || boulder.z >= chunk.minZ + chunk.size) continue;
+    if (boulder.y > TIDE_MIDDLE + TIDE_AMPLITUDE + 0.4 || channelInfluenceAt(boulder.x, boulder.z) < 0.1) continue;
+    for (let clump = 0; clump < 5; clump++) {
+      const angle = random() * Math.PI * 2;
+      const x = boulder.x + Math.cos(angle) * boulder.radius * 0.95;
+      const z = boulder.z + Math.sin(angle) * boulder.radius * 0.95;
+      const colorIndex = EELGRASS_COLORS.length + Math.floor(random() * BLADDERWRACK_COLORS.length);
+      placements.push(...tuftsAround(world, random, x, z, 6, 0.8, 0.1, (next) => ({ length: 0.7 + next() * 0.9, width: 0.22 + next() * 0.12, colorIndex, shade: 0.8 + next() * 0.3 })));
+    }
+  }
+  return placements;
+}
+
+function saltmarshPlacements(world, quality, chunk) {
+  const { random } = chunk;
+  const placements = [];
+  for (let attempt = attemptsFor(random, SALTMARSH_ATTEMPTS_PER_AREA * quality.density); attempt > 0; attempt--) {
+    const [x, z] = chunk.pointInside();
+    const influence = channelInfluenceAt(x, z);
+    if (influence < 0.15) continue;
+    const height = world.heightAt(x, z);
+    const aboveHighTide = height - (TIDE_MIDDLE + TIDE_AMPLITUDE);
+    if (aboveHighTide < 0.3 || aboveHighTide > 3.2 || random() > influence * (0.4 + 0.6 * meadowNoise(x * 0.05 + 30, z * 0.05) + 0.4)) continue;
+    const colorIndex = Math.floor(random() * SALTMARSH_COLORS.length);
+    placements.push(...tuftsAround(world, random, x, z, 7 + Math.floor(random() * 6), 0.6, 0.25, (next) => ({ length: 0.9 + next() * 1.3, width: 0.12 + next() * 0.08, colorIndex, shade: 0.8 + next() * 0.35 })));
+  }
+  return placements;
+}
+
+function groundMatPlacements(world, quality, chunk) {
+  const { random } = chunk;
+  const mats = [];
+  const highTide = TIDE_MIDDLE + TIDE_AMPLITUDE;
+  for (let attempt = attemptsFor(random, WRACK_ATTEMPTS_PER_AREA * quality.density); attempt > 0; attempt--) {
+    const [x, z] = chunk.pointInside();
+    const height = world.heightAt(x, z);
+    const fromWrackLine = Math.abs(height - (highTide + 0.35 + 0.25 * meadowNoise(x * 0.08, z * 0.08)));
+    if (fromWrackLine > 0.25 || world.isOnReef(x, z) || world.isInHold(x, z) || random() < fromWrackLine * 2.5) continue;
+    mats.push({ x, y: height + 0.02, z, length: 0.6 + random() * 1.4, width: 0.25 + random() * 0.35, heading: random() * Math.PI, color: WRACK_COLORS[Math.floor(random() * WRACK_COLORS.length)], shade: 0.8 + random() * 0.4 });
+  }
+  for (let attempt = attemptsFor(random, SEA_LETTUCE_ATTEMPTS_PER_AREA * quality.density); attempt > 0; attempt--) {
+    const [x, z] = chunk.pointInside();
+    if (channelInfluenceAt(x, z) < 0.3) continue;
+    const height = world.heightAt(x, z);
+    if (height > -1.1 || height < -3.4) continue;
+    mats.push({ x, y: height + 0.03, z, length: 0.5 + random() * 0.9, width: 0.4 + random() * 0.6, heading: random() * Math.PI, color: SEA_LETTUCE_COLORS[Math.floor(random() * SEA_LETTUCE_COLORS.length)], shade: 0.85 + random() * 0.3 });
+  }
+  return mats;
+}
+
+function buildGroundMats(quality) {
+  const geometry = new THREE.SphereGeometry(1, 10, 5);
+  geometry.scale(1, 0.08, 1);
+  const material = applySeaside(new THREE.MeshStandardMaterial({ roughness: 0.7 }), { wetDarkening: 0.5, wetRoughness: 0.3, chromaticCaustics: quality.chromaticCaustics });
+  let mesh = null;
+  const group = new THREE.Group();
+  const transform = new THREE.Object3D();
+  const tint = new THREE.Color();
+  function setMats(mats) {
+    if (!mesh || mats.length > mesh.instanceMatrix.count) {
+      if (mesh) {
+        group.remove(mesh);
+        mesh.dispose();
+      }
+      mesh = new THREE.InstancedMesh(geometry, material, Math.ceil(Math.max(64, mats.length * 1.3)));
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false;
+      group.add(mesh);
+    }
+    mats.forEach((mat, index) => {
+      transform.position.set(mat.x, mat.y, mat.z);
+      transform.rotation.set(0, mat.heading, 0);
+      transform.scale.set(mat.length, 1, mat.width);
+      transform.updateMatrix();
+      mesh.setMatrixAt(index, transform.matrix);
+      mesh.setColorAt(index, tint.copy(mat.color).multiplyScalar(mat.shade));
+    });
+    mesh.count = mats.length;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+  return { group, setMats };
 }
 
 function grassPlacements(world, quality, chunk) {
@@ -349,7 +468,13 @@ function buildFishSchool(world, quality) {
 export function createLife(scene, world, quality) {
   const seaweedField = buildBladeField(SEAWEED_COLORS, quality, { floats: true, castShadow: false, widthSegments: SEAWEED_WIDTH_SEGMENTS, lengthSegments: SEAWEED_LENGTH_SEGMENTS });
   const grassField = buildBladeField(GRASS_COLORS, quality, { floats: false, castShadow: quality.grassShadows, widthSegments: 1, lengthSegments: GRASS_BLADE_SEGMENTS });
-  scene.add(seaweedField.mesh, grassField.mesh);
+  const eelgrassField = buildBladeField([...EELGRASS_COLORS, ...BLADDERWRACK_COLORS], quality, { floats: true, castShadow: false, widthSegments: 1, lengthSegments: GRASS_BLADE_SEGMENTS });
+  const saltmarshField = buildBladeField(SALTMARSH_COLORS, quality, { floats: false, castShadow: false, widthSegments: 1, lengthSegments: GRASS_BLADE_SEGMENTS });
+  const groundMats = buildGroundMats(quality);
+  scene.add(seaweedField.mesh, grassField.mesh, eelgrassField.mesh, saltmarshField.mesh, groundMats.group);
+  const eelgrassLayer = createScatterLayer({ seed: 1202, radius: BLADE_RADIUS, generate: (chunk) => eelgrassPlacements(world, quality, chunk), onChange: eelgrassField.setPlacements });
+  const saltmarshLayer = createScatterLayer({ seed: 1203, radius: BLADE_RADIUS, generate: (chunk) => saltmarshPlacements(world, quality, chunk), onChange: saltmarshField.setPlacements });
+  const groundMatLayer = createScatterLayer({ seed: 1204, radius: CREATURE_RADIUS, generate: (chunk) => groundMatPlacements(world, quality, chunk), onChange: groundMats.setMats });
   const seaweedLayer = createScatterLayer({ seed: 909, radius: BLADE_RADIUS, generate: (chunk) => seaweedPlacements(world, quality, chunk), onChange: seaweedField.setPlacements });
   const grassLayer = createScatterLayer({ seed: 515, radius: BLADE_RADIUS, generate: (chunk) => grassPlacements(world, quality, chunk), onChange: grassField.setPlacements });
 
@@ -405,6 +530,9 @@ export function createLife(scene, world, quality) {
   function follow(x, z) {
     seaweedLayer.follow(x, z);
     grassLayer.follow(x, z);
+    eelgrassLayer.follow(x, z);
+    saltmarshLayer.follow(x, z);
+    groundMatLayer.follow(x, z);
     starfishLayer.follow(x, z);
     anemoneLayer.follow(x, z);
   }
