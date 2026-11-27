@@ -78,12 +78,51 @@ export function heightAt(x, z) {
 
 const channelNoise = createNoise2D(211);
 const CHANNEL_BANK_WIDENING_PER_HEIGHT = 2.2;
+const CHANNEL_ROCK_SEED = 4242;
+const CHANNEL_ROCK_SPACING = 13;
+const CHANNEL_ROCK_CHANCE = 0.6;
+const CHANNEL_ROCKS_SEAWARD_LIMIT_Z = 120;
 const TIDAL_GROUND_ABOVE_SANDBAR = 1.2;
-export const channelCenterAt = (z) => CHANNEL.centerX + CHANNEL.wiggle * Math.sin(z * 0.021);
-const channelHalfWidthAt = (z) => CHANNEL.halfWidth * (0.85 + 0.3 * channelNoise(z * 0.03, 0.5));
+export const channelCenterAt = (z) => CHANNEL.centerX + CHANNEL.wiggle * Math.sin(z * 0.011 + 0.7) + CHANNEL.wander * channelNoise(z * 0.018, 1.7) + 0.4 * CHANNEL.wander * Math.sin(z * 0.047 + 2.1);
+const lagoonBulgeAt = (z) => CHANNEL.lagoonExtraHalfWidth * Math.exp(-(((z - CHANNEL.lagoonZ) / CHANNEL.lagoonLength) ** 2));
+const channelHalfWidthAt = (z) => (lerp(CHANNEL.inlandHalfWidth, CHANNEL.mouthHalfWidth, smoothstep(CHANNEL.mouthStartZ, CHANNEL.mouthFullZ, z)) + lagoonBulgeAt(z)) * (0.72 + 0.28 * channelNoise(z * 0.025, 0.5));
+const channelBankWidthAt = (x, z, height) => (CHANNEL.bankWidth + CHANNEL_BANK_WIDENING_PER_HEIGHT * Math.max(0, height)) * (1 + 0.45 * channelNoise(z * 0.03, x > channelCenterAt(z) ? 5.1 : 8.4));
+const channelAcrossAt = (x, z) => Math.abs(x - channelCenterAt(z)) + 3 * channelNoise(x * 0.09, z * 0.09);
+
+export const sandbarCenterZAt = (x) => {
+  const along = x - channelCenterAt(SANDBAR.z);
+  return SANDBAR.z + SANDBAR.curve * Math.sin(along * 0.06) + 2 * channelNoise(x * 0.05, 3.3);
+};
+
+function sandbarShareAt(x, z) {
+  const across = Math.abs(x - channelCenterAt(SANDBAR.z));
+  const halfWidth = channelHalfWidthAt(SANDBAR.z);
+  const spitWidening = 1 + SANDBAR.spitWidening * smoothstep(halfWidth * 0.45, halfWidth * 1.1, across);
+  const halfLength = SANDBAR.halfLength * (0.8 + 0.3 * channelNoise(x * 0.04, 7.7)) * spitWidening;
+  return 1 - smoothstep(halfLength, halfLength + SANDBAR.rampLength, Math.abs(z - sandbarCenterZAt(x)));
+}
 
 export function isTidalGround(x, z, height) {
-  return height < SANDBAR.top + TIDAL_GROUND_ABOVE_SANDBAR && Math.abs(x - channelCenterAt(z)) < channelHalfWidthAt(z) + CHANNEL.bankWidth && z > CHANNEL.inlandEndZ;
+  return height < SANDBAR.top + TIDAL_GROUND_ABOVE_SANDBAR && channelAcrossAt(x, z) < channelHalfWidthAt(z) + CHANNEL.bankWidth * 1.5 && z > CHANNEL.inlandEndZ;
+}
+
+function channelRocks() {
+  const random = createRandom(CHANNEL_ROCK_SEED);
+  const rocks = [];
+  for (let z = PLAY_BOUNDS.minZ + 6; z < CHANNEL_ROCKS_SEAWARD_LIMIT_Z; z += CHANNEL_ROCK_SPACING) {
+    for (const side of [-1, 1]) {
+      if (random() > CHANNEL_ROCK_CHANCE) continue;
+      const rockZ = z + (random() - 0.5) * CHANNEL_ROCK_SPACING;
+      const offset = channelHalfWidthAt(rockZ) + 1.5 + random() * CHANNEL.bankWidth * 0.7;
+      const x = channelCenterAt(rockZ) + side * offset;
+      const radius = 1.8 + random() * random() * 5;
+      if (Math.abs(rockZ - sandbarCenterZAt(x)) < SANDBAR.halfLength * 2 + radius + 4) continue;
+      if (Math.hypot(x - HOLD.x, rockZ - HOLD.z) < HOLD.halfLength + radius + 6) continue;
+      if ([...BOULDERS, ...rocks].some((other) => Math.hypot(other.x - x, other.z - rockZ) < other.radius + radius + 2)) continue;
+      rocks.push({ x, z: rockZ, radius, squash: 0.6 + random() * 0.3, seed: 100 + rocks.length });
+    }
+  }
+  return rocks;
 }
 
 let campLevel = null;
@@ -94,14 +133,14 @@ function shapeLandmarks(x, z, height) {
     if (campLevel === null) campLevel = beachHeight(CAMP.x, CAMP.z);
     height = lerp(campLevel, height, smoothstep(CAMP.radius * CAMP_FLAT.innerShare, CAMP.radius * CAMP_FLAT.outerShare, fromCamp));
   }
-  const across = Math.abs(x - channelCenterAt(z));
+  const across = channelAcrossAt(x, z);
   const halfWidth = channelHalfWidthAt(z);
-  const bankWidth = CHANNEL.bankWidth + CHANNEL_BANK_WIDENING_PER_HEIGHT * Math.max(0, height);
+  const bankWidth = channelBankWidthAt(x, z, height);
   if (across > halfWidth + bankWidth || z < CHANNEL.inlandEndZ) return height;
   const channelShare = 1 - smoothstep(halfWidth, halfWidth + bankWidth, across);
   height = lerp(height, Math.min(height, CHANNEL.floor + 0.6 * channelNoise(x * 0.08, z * 0.08)), channelShare);
-  const barShare = 1 - smoothstep(SANDBAR.halfLength, SANDBAR.halfLength + SANDBAR.rampLength, Math.abs(z - SANDBAR.z + 1.5 * channelNoise(x * 0.07, 3.3)));
-  if (barShare > 0) height = Math.max(height, lerp(height, SANDBAR.top + 0.25 * channelNoise(x * 0.2, z * 0.2), barShare));
+  const barShare = sandbarShareAt(x, z);
+  if (barShare > 0) height = Math.max(height, lerp(height, SANDBAR.top + 0.35 * channelNoise(x * 0.12, z * 0.2), barShare));
   return height;
 }
 
@@ -571,7 +610,7 @@ export function createWorld(quality) {
   const collisionField = buildCollisionField();
   const retained = buildRetainedWater();
   const ground = { heightAt: collisionField.sample, retained };
-  const boulders = BOULDERS.map((boulder) => ({ ...boulder, y: collisionField.sample(boulder.x, boulder.z) - boulder.radius * boulder.squash * 0.22 }));
+  const boulders = [...BOULDERS, ...channelRocks()].map((boulder) => ({ ...boulder, y: collisionField.sample(boulder.x, boulder.z) - boulder.radius * boulder.squash * 0.22 }));
   const logs = DRIFT_LOGS.map((log) => ({ ...log, y: collisionField.sample(log.x, log.z) }));
   const reefProps = placeReefProps(collisionField.sample, boulders);
   const morayDens = placeMorayDens(reefProps);

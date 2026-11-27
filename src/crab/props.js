@@ -114,13 +114,17 @@ const LOOSE_PEBBLE_ATTEMPTS_PER_AREA = 0.0483;
 const RING_PEBBLE_ATTEMPTS_PER_BOULDER = 60;
 const PEBBLE_RADIUS = 110;
 const PEBBLE_LAYER_SEED = 404;
+const LOW_FLAT_HIGHEST = -1.3;
+const LOW_FLAT_LOWEST = -3.4;
+const LOW_FLAT_PEBBLE_CHANCE = 0.14;
 
 function pebbleAt(world, random, x, z, aroundBoulder) {
   if (world.isInHold(x, z)) return null;
   const height = world.heightAt(x, z);
   const inPool = world.retained.levelAt(x, z) - height > 0.3;
   const onStrandLine = Math.abs(height - (TIDE_MIDDLE + TIDE_AMPLITUDE + 0.5)) < 0.5 || Math.abs(height - TIDE_MIDDLE) < 0.35;
-  if (!aroundBoulder && !inPool && !onStrandLine && random() > 0.045) return null;
+  const onLowFlat = height < LOW_FLAT_HIGHEST && height > LOW_FLAT_LOWEST && !world.isOnReef(x, z);
+  if (!aroundBoulder && !inPool && !onStrandLine && random() > (onLowFlat ? LOW_FLAT_PEBBLE_CHANCE : 0.045)) return null;
   if (world.boulders.some((boulder) => Math.hypot(x - boulder.x, z - boulder.z) < boulder.radius * 0.9)) return null;
   const size = 0.14 + random() * random() * 0.75;
   const transform = new THREE.Object3D();

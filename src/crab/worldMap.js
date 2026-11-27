@@ -24,8 +24,8 @@ export const REEF_HIGHEST = -1.2;
 export const WEST_REEF = { startX: -130, fullX: -210, extraReach: 84 };
 export const DEEP_REEF = { startZ: 125, fullZ: 150, extraDepth: 1.2 };
 
-export const CHANNEL = { centerX: 192, wiggle: 10, halfWidth: 20, bankWidth: 18, floor: -8, inlandEndZ: -300 };
-export const SANDBAR = { z: 22, halfLength: 7, rampLength: 5, top: -2.0, openBelowTop: 0.4 };
+export const CHANNEL = { centerX: 192, wiggle: 26, wander: 18, lagoonZ: -115, lagoonLength: 28, lagoonExtraHalfWidth: 16, inlandHalfWidth: 13, mouthHalfWidth: 30, mouthStartZ: -220, mouthFullZ: 150, bankWidth: 16, floor: -8, inlandEndZ: -300 };
+export const SANDBAR = { z: 22, halfLength: 6, rampLength: 6, curve: 8, spitWidening: 0.9, top: -2.0, openBelowTop: 0.4 };
 
 export const BOULDERS = [
   { x: -34, z: -52, radius: 10.5, squash: 0.74, seed: 1 },
@@ -57,10 +57,6 @@ export const BOULDERS = [
   { x: 334, z: 60, radius: 7.2, squash: 0.7, seed: 28 },
   { x: 360, z: -96, radius: 10.4, squash: 0.8, seed: 29 },
   { x: 152, z: 30, radius: 6.8, squash: 0.68, seed: 30 },
-  { x: 160, z: 9, radius: 3.2, squash: 0.95, seed: 31 },
-  { x: 160, z: 35, radius: 3.2, squash: 0.95, seed: 32 },
-  { x: 234, z: 9, radius: 3.2, squash: 0.95, seed: 33 },
-  { x: 234, z: 35, radius: 3.2, squash: 0.95, seed: 34 },
 ];
 
 export const DRIFT_LOGS = [

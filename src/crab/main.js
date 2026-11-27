@@ -276,6 +276,7 @@ const POSES = {
   142: { x: -196, z: 0, distance: 40, tideShare: 0.56, heading: 0.4, revealAround: 120 },
   143: { x: 160, z: -120, distance: 75, tideShare: 0.56, heading: 1.6, revealAround: 160 },
   144: { x: -230, z: -120, distance: 80, tideShare: 0.56, heading: 3.6, revealAround: 160 },
+  145: { x: 140, z: -112, distance: 80, tideShare: 0.56, heading: 0, revealAround: 160 },
   130: { x: 10, z: 80, distance: 9, tideShare: 0.75, heading: 0.4, level: 8, revealAround: 60, enemy: { kind: 'octopus', offsetX: 2.2, offsetZ: 2.2, loot: { shell: 'turban' } } },
   131: { x: 15, z: -20, distance: 6, tideShare: 0.56, heading: 0.9, enemy: { kind: 'rivalHermit', offsetX: 1.2, offsetZ: -1.8, loot: { shell: 'coral', big: 'coralTipped', small: 'shellShield' } } },
   132: { x: 13, z: -9, distance: 9, tideShare: 0.56, heading: 0.2 },
